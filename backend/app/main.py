@@ -11,18 +11,17 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="Elektro Pepel – Zeiterfassung API",
+    title="Elektro Pepel",
     version="1.0.0",
     docs_url="/api/docs",
     redoc_url=None,
     lifespan=lifespan,
 )
 
-# CORS — alle Vercel-Subdomains erlauben
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Für Produktion später auf Vercel-URL einschränken
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

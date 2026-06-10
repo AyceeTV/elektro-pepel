@@ -8,6 +8,7 @@ import RegiezettelPage from "./pages/RegiezettelPage";
 import TeamPage from "./pages/TeamPage";
 import AdminPage from "./pages/AdminPage";
 import AuftraegePage from "./pages/AuftraegePage";
+import BuchhaltungPage from "./pages/BuchhaltungPage";
 
 export const AppContext = createContext();
 export const useApp = () => useContext(AppContext);
@@ -83,6 +84,7 @@ export default function App() {
     team: <TeamPage />,
     admin: <AdminPage />,
     auftraege: <AuftraegePage />,
+    buchhaltung: <BuchhaltungPage />,
   };
 
   const isMobile = window.innerWidth < 768;

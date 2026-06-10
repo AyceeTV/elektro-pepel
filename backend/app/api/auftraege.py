@@ -124,6 +124,15 @@ def liste(
             "termin_bis": a.termin_bis,
             "mitarbeiter": [z.user.vollname for z in a.zuweisungen if z.user],
             "regiezettel_count": len(a.regiezettel_auftraege),
+            "regiezettel": [{
+                "id": r.id,
+                "datum": str(r.datum),
+                "arbeitsstunden": r.arbeitsstunden,
+                "taetigkeit": r.taetigkeit,
+                "unterschrift_mitarbeiter": bool(r.unterschrift_mitarbeiter),
+                "unterschrift_kunde": bool(r.unterschrift_kunde),
+                "pdf_erstellt_am": str(r.pdf_erstellt_am) if r.pdf_erstellt_am else None,
+            } for r in a.regiezettel_auftraege],
         })
     return result
 

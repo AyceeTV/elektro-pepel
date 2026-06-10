@@ -1,176 +1,272 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../App";
-import { Seite, Karte, StatKarte, Btn, Select, Textarea, Tabelle, Modal, Lader, Badge } from "../components/ui/UI";
+import { Seite, Karte, Btn, Select, Modal, Lader, Badge } from "../components/ui/UI";
 
 export default function ZeiterfassungPage() {
-  const { t, apiFetch, showToast, user } = useApp();
-  const [status, setStatus] = useState(null);
-  const [uhr, setUhr] = useState(new Date());
-  const [baustellen, setBaustellen] = useState([]);
+  const { apiFetch, showToast, user } = useApp();
+  const [heute] = useState(new Date());
+  const [monat, setMonat] = useState(new Date().getMonth());
+  const [jahr, setJahr] = useState(new Date().getFullYear());
+  const [gewaehlterTag, setGewaehlterTag] = useState(new Date().getDate());
   const [eintraege, setEintraege] = useState([]);
+  const [baustellen, setBaustellen] = useState([]);
   const [laden, setLaden] = useState(true);
-  const [einModal, setEinModal] = useState(false);
-  const [ausModal, setAusModal] = useState(false);
-  const [pause, setPause] = useState("0");
-  const [taetigkeit, setTaetigkeit] = useState("");
-  const [materialien, setMaterialien] = useState([]);
-  const [matBez, setMatBez] = useState("");
-  const [matMenge, setMatMenge] = useState("");
-  const [gewaehlteBaustelle, setGewaehlteBaustelle] = useState("");
+  const [speichern, setSpeichern] = useState(false);
 
-  useEffect(() => { const t = setInterval(() => setUhr(new Date()), 1000); return () => clearInterval(t); }, []);
-  useEffect(() => { ladeAlles(); }, []);
+  // Formular
+  const [stunden, setStunden] = useState("");
+  const [taetigkeit, setTaetigkeit] = useState("");
+  const [baustelle, setBaustelle] = useState("");
+  const [editId, setEditId] = useState(null);
+
+  useEffect(() => { ladeAlles(); }, [monat, jahr]);
 
   async function ladeAlles() {
     setLaden(true);
-    const [sRes, bRes, zRes] = await Promise.all([
-      apiFetch("/api/zeiterfassung/status"),
+    const [eRes, bRes] = await Promise.all([
+      apiFetch(`/api/zeiterfassung/meine?monat=${monat + 1}&jahr=${jahr}`),
       apiFetch("/api/baustellen/"),
-      apiFetch("/api/zeiterfassung/meine"),
     ]);
-    if (sRes?.ok) setStatus(await sRes.json());
+    if (eRes?.ok) setEintraege(await eRes.json());
     if (bRes?.ok) setBaustellen(await bRes.json());
-    if (zRes?.ok) setEintraege(await zRes.json());
     setLaden(false);
   }
 
-  async function einstempeln() {
+  async function eintragSpeichern() {
+    if (!stunden || isNaN(Number(stunden))) { showToast("Bitte gültige Stundenzahl eingeben", "err"); return; }
+    setSpeichern(true);
+
+    const datum = `${jahr}-${String(monat + 1).padStart(2,"0")}-${String(gewaehlterTag).padStart(2,"0")}`;
+    const beginDt = `${datum}T07:00:00`;
+    const endDt   = `${datum}T${String(7 + Math.floor(Number(stunden))).padStart(2,"0")}:${String(Math.round((Number(stunden) % 1) * 60)).padStart(2,"0")}:00`;
+
     const res = await apiFetch("/api/zeiterfassung/einstempeln", {
       method: "POST",
-      body: JSON.stringify({ baustelle_id: gewaehlteBaustelle ? Number(gewaehlteBaustelle) : null, taetigkeit: taetigkeit || null }),
+      body: JSON.stringify({
+        baustelle_id: baustelle ? Number(baustelle) : null,
+        taetigkeit: taetigkeit || null,
+        datum_manuell: datum,
+      }),
     });
-    if (res?.ok) { showToast(t("msg_einstempeln_ok")); setEinModal(false); setTaetigkeit(""); ladeAlles(); }
-    else showToast(t("msg_fehler"), "err");
-  }
 
-  async function ausstempeln() {
-    const res = await apiFetch("/api/zeiterfassung/ausstempeln", {
-      method: "POST",
-      body: JSON.stringify({ pause_minuten: Number(pause), taetigkeit: taetigkeit || null, materialien }),
-    });
+    // Da unser Backend Einstempeln/Ausstempeln nutzt, machen wir beides direkt
     if (res?.ok) {
       const d = await res.json();
-      showToast(`${t("msg_ausstempeln_ok")} ${d.arbeitsstunden}h`);
-      setAusModal(false); setPause("0"); setTaetigkeit(""); setMaterialien([]);
+      await apiFetch("/api/zeiterfassung/ausstempeln", {
+        method: "POST",
+        body: JSON.stringify({
+          pause_minuten: 0,
+          taetigkeit: taetigkeit || null,
+          arbeitsstunden_manuell: Number(stunden),
+        }),
+      });
+      showToast(`${stunden}h gespeichert`);
+      setStunden(""); setTaetigkeit(""); setBaustelle("");
       ladeAlles();
-    } else showToast(t("msg_fehler"), "err");
+    } else {
+      // Fallback: direkt über einen neuen Endpunkt
+      const res2 = await apiFetch("/api/zeiterfassung/manuell", {
+        method: "POST",
+        body: JSON.stringify({
+          datum,
+          arbeitsstunden: Number(stunden),
+          baustelle_id: baustelle ? Number(baustelle) : null,
+          taetigkeit: taetigkeit || null,
+        }),
+      });
+      if (res2?.ok) {
+        showToast(`${stunden}h gespeichert`);
+        setStunden(""); setTaetigkeit(""); setBaustelle("");
+        ladeAlles();
+      } else {
+        const err = await res2?.json();
+        showToast(err?.detail || "Fehler", "err");
+      }
+    }
+    setSpeichern(false);
   }
 
-  const laufSek = status?.eingestempelt ? Math.floor((uhr - new Date(status.beginn)) / 1000) : 0;
-  const laufStr = `${String(Math.floor(laufSek / 3600)).padStart(2,"0")}:${String(Math.floor((laufSek % 3600) / 60)).padStart(2,"0")}:${String(laufSek % 60).padStart(2,"0")}`;
-  const stundenHeute = eintraege.filter(e => e.datum === uhr.toISOString().slice(0,10)).reduce((s,e) => s + (e.arbeitsstunden||0), 0);
-  const stundenMonat = eintraege.reduce((s,e) => s + (e.arbeitsstunden||0), 0);
+  // Kalender-Logik
+  const ersterTagDesMonats = new Date(jahr, monat, 1).getDay(); // 0=So
+  const wochentag = ersterTagDesMonats === 0 ? 6 : ersterTagDesMonats - 1; // Mo=0
+  const tageImMonat = new Date(jahr, monat + 1, 0).getDate();
 
-  if (laden) return <Lader />;
+  const stundenProTag = {};
+  eintraege.forEach(e => {
+    const tag = new Date(e.datum).getDate();
+    stundenProTag[tag] = (stundenProTag[tag] || 0) + (e.arbeitsstunden || 0);
+  });
 
-  const bsName = status?.baustelle_id ? baustellen.find(b => b.id === status.baustelle_id)?.name : null;
+  const gesamtMonat = Object.values(stundenProTag).reduce((s, h) => s + h, 0);
+
+  const tagEintraege = eintraege.filter(e => {
+    const d = new Date(e.datum);
+    return d.getDate() === gewaehlterTag && d.getMonth() === monat && d.getFullYear() === jahr;
+  });
+
+  const gewaehltesDatum = `${jahr}-${String(monat + 1).padStart(2,"0")}-${String(gewaehlterTag).padStart(2,"0")}`;
+
+  function vorMonat() {
+    if (monat === 0) { setMonat(11); setJahr(j => j - 1); } else setMonat(m => m - 1);
+    setGewaehlterTag(1);
+  }
+  function nachMonat() {
+    if (monat === 11) { setMonat(0); setJahr(j => j + 1); } else setMonat(m => m + 1);
+    setGewaehlterTag(1);
+  }
+
+  const MONATE = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+  const WOCHENTAGE = ["MO","DI","MI","DO","FR","SA","SO"];
+
+  const istHeute = (tag) => tag === heute.getDate() && monat === heute.getMonth() && jahr === heute.getFullYear();
+  const istGewählt = (tag) => tag === gewaehlterTag;
 
   return (
-    <Seite titel={t("nav_zeiterfassung")} untertitel={uhr.toLocaleDateString("de-DE", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}>
-
-      {/* ── Top Row ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 24 }}>
-        <StatKarte zahl={uhr.toLocaleTimeString("de-DE", { hour:"2-digit", minute:"2-digit" })} label="Aktuelle Uhrzeit" icon="🕐" />
-        <StatKarte zahl={`${stundenHeute.toFixed(1)}h`} label="Heute gearbeitet" icon="⏱" farbe="#f59e0b" />
-        <StatKarte zahl={`${stundenMonat.toFixed(1)}h`} label="Diesen Monat" icon="📅" farbe="#16a34a" />
-        <StatKarte zahl={eintraege.length} label="Einträge gesamt" icon="📋" farbe="#7c3aed" />
+    <div>
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "inline-block", background: "#f59e0b", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 6, width: "fit-content" }}>
+          <span>📅</span> ZEITERFASSUNG
+        </div>
+        <h1 style={{ fontSize: 32, fontWeight: 800, color: "#0f1923", margin: "0 0 4px", letterSpacing: "-0.5px" }}>Arbeitszeiten</h1>
+        <p style={{ color: "#64748b", fontSize: 15, margin: 0 }}>Tag im Kalender wählen, Stunden und Tätigkeit eintragen.</p>
       </div>
 
-      {/* ── Status + Buttons ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <Karte style={{ background: status?.eingestempelt ? "#0f1923" : "white", color: status?.eingestempelt ? "white" : "inherit" }}>
-          <div style={{ marginBottom: 16 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.6, margin: "0 0 8px" }}>Status</p>
-            {status?.eingestempelt ? (
-              <>
-                <div style={{ fontSize: 36, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "#f59e0b" }}>{laufStr}</div>
-                <div style={{ fontSize: 13, opacity: 0.7, marginTop: 6 }}>
-                  Eingestempelt {new Date(status.beginn).toLocaleTimeString("de-DE", { hour:"2-digit", minute:"2-digit" })} Uhr
-                  {bsName && <span> · 🏗 {bsName}</span>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20, alignItems: "start" }}>
+
+        {/* ── Kalender ── */}
+        <div style={{ background: "white", border: "2px solid #0f1923", borderRadius: 4 }}>
+          {/* Kalender Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e8edf2" }}>
+            <button onClick={vorMonat} style={{ width: 36, height: 36, border: "2px solid #0f1923", borderRadius: 4, background: "white", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>‹</button>
+            <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>{MONATE[monat]} {jahr}</h2>
+            <button onClick={nachMonat} style={{ width: 36, height: 36, border: "2px solid #0f1923", borderRadius: 4, background: "white", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>›</button>
+          </div>
+
+          {/* Wochentage */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid #e8edf2" }}>
+            {WOCHENTAGE.map(w => (
+              <div key={w} style={{ textAlign: "center", padding: "10px 0", fontSize: 12, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em" }}>{w}</div>
+            ))}
+          </div>
+
+          {/* Tage */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+            {/* Leere Felder vor dem 1. */}
+            {Array.from({ length: wochentag }).map((_, i) => (
+              <div key={`leer-${i}`} style={{ borderRight: "1px solid #f1f5f9", borderBottom: "1px solid #f1f5f9", minHeight: 64 }} />
+            ))}
+            {/* Tage */}
+            {Array.from({ length: tageImMonat }).map((_, i) => {
+              const tag = i + 1;
+              const h = stundenProTag[tag];
+              const heute_ = istHeute(tag);
+              const gewaehlt = istGewählt(tag);
+              return (
+                <div key={tag} onClick={() => setGewaehlterTag(tag)} style={{
+                  borderRight: "1px solid #e8edf2", borderBottom: "1px solid #e8edf2",
+                  minHeight: 64, padding: "10px 8px", cursor: "pointer",
+                  background: gewaehlt ? "#f59e0b" : heute_ ? "#0f1923" : "white",
+                  transition: "background 0.1s",
+                  position: "relative",
+                }}
+                  onMouseEnter={e => { if (!gewaehlt && !heute_) e.currentTarget.style.background = "#f8fafc"; }}
+                  onMouseLeave={e => { if (!gewaehlt && !heute_) e.currentTarget.style.background = "white"; }}
+                >
+                  <div style={{ fontSize: 16, fontWeight: 700, color: gewaehlt ? "#0f1923" : heute_ ? "white" : "#0f1923" }}>{tag}</div>
+                  {h > 0 && (
+                    <div style={{ fontSize: 11, fontWeight: 600, color: gewaehlt ? "#0f1923" : "#f59e0b", marginTop: 4 }}>{h.toFixed(1)}h</div>
+                  )}
                 </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 18, fontWeight: 600, color: "#64748b" }}>Nicht eingestempelt</div>
-            )}
+              );
+            })}
           </div>
-          {status?.eingestempelt
-            ? <Btn onClick={() => setAusModal(true)} variant="danger" size="lg" style={{ width: "100%" }}>⏹ Ausstempeln</Btn>
-            : <Btn onClick={() => setEinModal(true)} variant="amber" size="lg" style={{ width: "100%" }}>▶ Einstempeln</Btn>
-          }
-        </Karte>
 
-        {/* Schnellinfo */}
-        <Karte>
-          <p style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#94a3b8", margin: "0 0 16px" }}>Dieser Monat</p>
-          {[
-            ["Arbeitstage", eintraege.filter(e => e.arbeitsstunden).length + " Tage"],
-            ["Gesamtstunden", stundenMonat.toFixed(1) + " h"],
-            ["Ø pro Tag", eintraege.filter(e => e.arbeitsstunden).length > 0 ? (stundenMonat / eintraege.filter(e => e.arbeitsstunden).length).toFixed(1) + " h" : "—"],
-          ].map(([k, v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f1f5f9", fontSize: 14 }}>
-              <span style={{ color: "#64748b" }}>{k}</span>
-              <span style={{ fontWeight: 600, color: "#0f1923" }}>{v}</span>
+          {/* Footer */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 24px", borderTop: "2px solid #0f1923" }}>
+            <span style={{ fontSize: 14, color: "#64748b" }}>Summe {MONATE[monat]}:</span>
+            <span style={{ fontSize: 20, fontWeight: 800 }}>{gesamtMonat.toFixed(1)} h</span>
+          </div>
+        </div>
+
+        {/* ── Rechte Spalte ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Eingabe-Box */}
+          <div style={{ background: "white", border: "2px solid #0f1923", borderRadius: 4, padding: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em" }}>AUSGEWÄHLTER TAG</div>
+              {tagEintraege.length > 0 && (
+                <div style={{ background: "#f59e0b", borderRadius: 4, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
+                  {tagEintraege.reduce((s,e) => s + (e.arbeitsstunden||0), 0).toFixed(1)} H
+                </div>
+              )}
             </div>
-          ))}
-        </Karte>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 20, color: "#0f1923" }}>{gewaehltesDatum}</div>
+
+            {/* Baustelle */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", marginBottom: 8 }}>BAUSTELLE</div>
+              <select value={baustelle} onChange={e => setBaustelle(e.target.value)} style={{
+                width: "100%", padding: "10px 12px", fontSize: 14, border: "2px solid #0f1923",
+                borderRadius: 4, background: "white", outline: "none", cursor: "pointer"
+              }}>
+                <option value="">— wählen —</option>
+                {baustellen.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            {/* Stunden */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", marginBottom: 8 }}>STUNDEN</div>
+              <input
+                type="number" step="0.5" min="0.5" max="24"
+                value={stunden} onChange={e => setStunden(e.target.value)}
+                placeholder="z.B. 8"
+                style={{ width: "100%", padding: "10px 12px", fontSize: 14, border: "2px solid #0f1923", borderRadius: 4, boxSizing: "border-box", outline: "none" }}
+              />
+            </div>
+
+            {/* Tätigkeit */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", marginBottom: 8 }}>WAS WURDE GEMACHT?</div>
+              <textarea
+                value={taetigkeit} onChange={e => setTaetigkeit(e.target.value)}
+                placeholder="z.B. Verkabelung EG, Schalterdosen gesetzt"
+                rows={3}
+                style={{ width: "100%", padding: "10px 12px", fontSize: 14, border: "2px solid #0f1923", borderRadius: 4, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit", outline: "none" }}
+              />
+            </div>
+
+            <button onClick={eintragSpeichern} disabled={speichern} style={{
+              width: "100%", padding: "14px", background: speichern ? "#94a3b8" : "#f59e0b",
+              border: "2px solid #0f1923", borderRadius: 4, fontSize: 16, fontWeight: 800,
+              cursor: speichern ? "not-allowed" : "pointer", letterSpacing: "0.02em"
+            }}>
+              + Eintrag speichern
+            </button>
+          </div>
+
+          {/* Einträge des gewählten Tages */}
+          <div style={{ background: "white", border: "2px solid #0f1923", borderRadius: 4, padding: 24 }}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 800 }}>Einträge am {gewaehltesDatum}</h3>
+            {tagEintraege.length === 0 ? (
+              <p style={{ color: "#94a3b8", fontSize: 14, margin: 0 }}>Noch keine Einträge.</p>
+            ) : tagEintraege.map(e => (
+              <div key={e.id} style={{ padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{e.arbeitsstunden?.toFixed(1)} h</div>
+                    {e.baustelle_name && <div style={{ fontSize: 13, color: "#64748b" }}>🏗 {e.baustelle_name}</div>}
+                    {e.taetigkeit && <div style={{ fontSize: 13, color: "#475569", marginTop: 2 }}>{e.taetigkeit}</div>}
+                  </div>
+                  {e.korrigiert && <span style={{ fontSize: 11, background: "#fef3c7", color: "#92400e", borderRadius: 4, padding: "2px 8px", fontWeight: 600 }}>Korrigiert</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-
-      {/* ── Tabelle ── */}
-      <Karte style={{ padding: 0 }}>
-        <div style={{ padding: "16px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Zeiteinträge diesen Monat</h3>
-        </div>
-        <Tabelle
-          spalten={[
-            { key: "datum_fmt", label: "Datum" },
-            { key: "zeit", label: "Zeit" },
-            { key: "stunden", label: "Stunden" },
-            { key: "baustelle", label: "Baustelle" },
-            { key: "taetigkeit_fmt", label: "Tätigkeit" },
-            { key: "status_badge", label: "Status" },
-          ]}
-          zeilen={eintraege.slice(0, 20).map(e => ({
-            datum_fmt: new Date(e.datum).toLocaleDateString("de-DE", { weekday:"short", day:"numeric", month:"short" }),
-            zeit: `${new Date(e.beginn).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} – ${e.ende ? new Date(e.ende).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "läuft…"}`,
-            stunden: e.arbeitsstunden ? <strong>{e.arbeitsstunden.toFixed(1)} h</strong> : "—",
-            baustelle: e.baustelle_name || <span style={{color:"#94a3b8"}}>—</span>,
-            taetigkeit_fmt: e.taetigkeit ? <span style={{fontSize:13,color:"#475569"}}>{e.taetigkeit.slice(0,40)}</span> : <span style={{color:"#94a3b8"}}>—</span>,
-            status_badge: e.korrigiert ? <Badge label="Korrigiert" typ="warning" /> : e.ende ? <Badge label="Abgeschlossen" typ="success" /> : <Badge label="Läuft" typ="info" />,
-          }))}
-          leer="Keine Einträge diesen Monat"
-        />
-      </Karte>
-
-      {/* Einstempeln Modal */}
-      <Modal offen={einModal} onClose={() => setEinModal(false)} titel="Einstempeln">
-        <Select label="Baustelle (optional)" value={gewaehlteBaustelle} onChange={setGewaehlteBaustelle}
-          optionen={[{ value: "", label: "— Keine Baustelle —" }, ...baustellen.map(b => ({ value: b.id, label: b.name }))]} />
-        <Textarea label="Tätigkeit (optional)" value={taetigkeit} onChange={setTaetigkeit} placeholder="Was wird heute gemacht?" rows={2} />
-        <Btn onClick={einstempeln} variant="amber" size="lg" style={{ width: "100%" }}>▶ Jetzt einstempeln</Btn>
-      </Modal>
-
-      {/* Ausstempeln Modal */}
-      <Modal offen={ausModal} onClose={() => setAusModal(false)} titel="Ausstempeln">
-        <Select label="Pause" value={pause} onChange={setPause}
-          optionen={[{value:"0",label:"Keine Pause"},{value:"15",label:"15 Min"},{value:"30",label:"30 Min"},{value:"45",label:"45 Min"},{value:"60",label:"60 Min"}]} />
-        <Textarea label="Tätigkeit" value={taetigkeit} onChange={setTaetigkeit} placeholder="Was wurde heute gemacht?" />
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#0f1923", marginBottom: 8 }}>Materialien</label>
-          {materialien.map((m, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc", borderRadius: 6, padding: "6px 10px", marginBottom: 4, fontSize: 13 }}>
-              <span>📦 {m.bezeichnung} — {m.menge}</span>
-              <button onClick={() => setMaterialien(materialien.filter((_,j) => j!==i))} style={{ background:"none",border:"none",color:"#dc2626",cursor:"pointer" }}>✕</button>
-            </div>
-          ))}
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <input value={matBez} onChange={e => setMatBez(e.target.value)} placeholder="Material z.B. Kabel NYM" style={{ flex:2, padding:"8px 10px", borderRadius:6, border:"1px solid #e2e8f0", fontSize:13 }} />
-            <input value={matMenge} onChange={e => setMatMenge(e.target.value)} placeholder="Menge" style={{ flex:1, padding:"8px 10px", borderRadius:6, border:"1px solid #e2e8f0", fontSize:13 }} />
-            <button onClick={() => { if(matBez){ setMaterialien([...materialien,{bezeichnung:matBez,menge:matMenge}]); setMatBez(""); setMatMenge(""); }}}
-              style={{ padding:"8px 14px", background:"#0f1923", color:"white", border:"none", borderRadius:6, cursor:"pointer", fontSize:16 }}>+</button>
-          </div>
-        </div>
-        <Btn onClick={ausstempeln} variant="danger" size="lg" style={{ width: "100%" }}>⏹ Jetzt ausstempeln</Btn>
-      </Modal>
-    </Seite>
+    </div>
   );
 }

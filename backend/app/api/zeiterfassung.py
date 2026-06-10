@@ -244,3 +244,43 @@ def korrektur(
     db.add(log)
     db.commit()
     return {"message": "Korrektur gespeichert", "arbeitsstunden": eintrag.arbeitsstunden}
+
+
+@router.post("/manuell")
+def manueller_eintrag(
+    datum: str,
+    arbeitsstunden: float,
+    baustelle_id: int = None,
+    taetigkeit: str = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Manueller Zeiteintrag — Mitarbeiter trägt Stunden nachträglich ein"""
+    from datetime import date as date_type
+    from pydantic import BaseModel
+
+    try:
+        d = date_type.fromisoformat(datum)
+    except:
+        raise HTTPException(status_code=400, detail="Ungültiges Datum")
+
+    if arbeitsstunden <= 0 or arbeitsstunden > 24:
+        raise HTTPException(status_code=400, detail="Ungültige Stundenanzahl")
+
+    from datetime import datetime, timezone, timedelta
+    beginn = datetime(d.year, d.month, d.day, 7, 0, tzinfo=timezone.utc)
+    ende   = beginn + timedelta(hours=arbeitsstunden)
+
+    eintrag = Zeiteintrag(
+        user_id=current_user.id,
+        baustelle_id=baustelle_id,
+        datum=d,
+        beginn=beginn,
+        ende=ende,
+        pause_minuten=0,
+        arbeitsstunden=round(arbeitsstunden, 2),
+        taetigkeit=taetigkeit,
+    )
+    db.add(eintrag)
+    db.commit()
+    return {"message": "Eintrag gespeichert", "arbeitsstunden": arbeitsstunden}

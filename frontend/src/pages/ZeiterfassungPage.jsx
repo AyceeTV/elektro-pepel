@@ -154,7 +154,7 @@ export default function ZeiterfassungPage() {
       const d=await res.json();
       showToast(d.wartet_auf_genehmigung?"✓ Gespeichert — wartet auf Genehmigung":`✓ ${d.netto_stunden}h gespeichert`);
       ladeAlles(); setAnsicht("kalender"); setGewTag(null);
-    } else { const err=await res?.json().catch(()=>({}))); showToast(err?.detail||"Fehler","err"); }
+    } else { const err=await res?.json().catch(()=>({})); showToast(err?.detail||"Fehler","err"); }
     setSpeichern(false);
   }
 
@@ -168,7 +168,7 @@ export default function ZeiterfassungPage() {
     if (res?.ok) {
       showToast("✓ Antrag gestellt — wartet auf Freischaltung durch Verwaltung");
       ladeAlles(); setAnsicht("kalender"); setGewTag(null);
-    } else { const err=await res?.json().catch(()=>({}))); showToast(err?.detail||"Fehler","err"); }
+    } else { const err=await res?.json().catch(()=>({})); showToast(err?.detail||"Fehler","err"); }
     setSpeichern(false);
   }
 

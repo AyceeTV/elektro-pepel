@@ -10,6 +10,7 @@ from app.core.database import Base
 
 class Rolle(str, enum.Enum):
     admin        = "admin"
+    verwaltung   = "verwaltung"
     vorgesetzter = "vorgesetzter"
     bauleiter    = "bauleiter"
     mitarbeiter  = "mitarbeiter"

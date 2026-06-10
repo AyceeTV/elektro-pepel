@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import os
 
 from app.core.database import engine, Base
 from app.api import auth, users, zeiterfassung, baustellen, urlaub, regiezettel, admin
@@ -19,13 +18,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-allowed_origin = os.getenv("ALLOWED_ORIGIN", "*")
-origins = [allowed_origin] if allowed_origin != "*" else ["*"]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=allowed_origin != "*",
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

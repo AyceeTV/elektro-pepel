@@ -7,6 +7,7 @@ import UrlaubPage from "./pages/UrlaubPage";
 import RegiezettelPage from "./pages/RegiezettelPage";
 import TeamPage from "./pages/TeamPage";
 import AdminPage from "./pages/AdminPage";
+import AuftraegePage from "./pages/AuftraegePage";
 
 export const AppContext = createContext();
 export const useApp = () => useContext(AppContext);
@@ -70,6 +71,7 @@ export default function App() {
     { key: "urlaub",        icon: "🌴", label: t("nav_urlaub") },
     { key: "regiezettel",   icon: "📋", label: t("nav_regiezettel"), roles: ["admin","vorgesetzter","bauleiter"] },
     { key: "team",          icon: "👷", label: t("nav_team"),        roles: ["admin","vorgesetzter","bauleiter"] },
+    { key: "auftraege",     icon: "📋", label: "Aufträge" },
     { key: "admin",         icon: "⚙️", label: t("nav_admin"),       roles: ["admin"] },
   ].filter(n => !n.roles || n.roles.includes(user.rolle));
 
@@ -80,6 +82,7 @@ export default function App() {
     regiezettel: <RegiezettelPage />,
     team: <TeamPage />,
     admin: <AdminPage />,
+    auftraege: <AuftraegePage />,
   };
 
   const isMobile = window.innerWidth < 768;

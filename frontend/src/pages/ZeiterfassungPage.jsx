@@ -3,22 +3,14 @@ import { useApp } from "../App";
 import { Lader } from "../components/ui/UI";
 
 const MONATE = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
-const WOCHENTAGE = ["MO","DI","MI","DO","FR","SA","SO"];
-const S = {
-  label: { fontSize:11, fontWeight:700, color:"#64748b", letterSpacing:"0.08em", marginBottom:6, display:"block" },
-  input: { width:"100%", padding:"9px 12px", fontSize:14, border:"2px solid #0f1923", borderRadius:4, boxSizing:"border-box", outline:"none", fontFamily:"inherit" },
-  select: { width:"100%", padding:"9px 12px", fontSize:14, border:"2px solid #0f1923", borderRadius:4, background:"white", outline:"none", cursor:"pointer" },
-  card: { background:"white", border:"2px solid #0f1923", borderRadius:4, padding:20 },
-  btn: (bg, color="#0f1923") => ({ width:"100%", padding:"13px", background:bg, border:"2px solid #0f1923", borderRadius:4, fontSize:15, fontWeight:800, cursor:"pointer", color, marginBottom:8, letterSpacing:"0.02em" }),
-  btnSm: (bg) => ({ padding:"6px 12px", background:bg, border:"2px solid #0f1923", borderRadius:4, fontSize:13, fontWeight:700, cursor:"pointer" }),
-};
+const WOCHENTAGE = ["Mo","Di","Mi","Do","Fr","Sa","So"];
 
 export default function ZeiterfassungPage() {
   const { apiFetch, showToast } = useApp();
   const heute = new Date();
   const [monat, setMonat] = useState(heute.getMonth());
   const [jahr, setJahr] = useState(heute.getFullYear());
-  const [gewTag, setGewTag] = useState(heute.getDate());
+  const [gewTag, setGewTag] = useState(null); // null = Kalender-Ansicht
   const [eintraege, setEintraege] = useState([]);
   const [baustellen, setBaustellen] = useState([]);
   const [ueberstunden, setUeberstunden] = useState(0);
@@ -28,11 +20,10 @@ export default function ZeiterfassungPage() {
   // Formular
   const [beginnUhr, setBeginnUhr] = useState("07:00");
   const [endeUhr, setEndeUhr] = useState("16:00");
-  const [pausen, setPausen] = useState([{ von:"", bis:"" }]);
+  const [pausen, setPausen] = useState([]);
   const [positionen, setPositionen] = useState([{ baustelle_id:"", stunden:"", taetigkeit:"" }]);
   const [uebExtra, setUebExtra] = useState("");
   const [freizeit, setFreizeit] = useState("");
-  const [notizen, setNotizen] = useState("");
 
   useEffect(() => { ladeAlles(); }, [monat, jahr]);
 
@@ -49,307 +40,366 @@ export default function ZeiterfassungPage() {
     setLaden(false);
   }
 
-  // Berechnung Soll/Ist
-  const berechneSollIst = () => {
+  function tagAnklicken(tag) {
+    setGewTag(tag);
+    // Vorhandene Einträge laden falls vorhanden
+    const vorhandene = eintraege.filter(e => new Date(e.datum).getDate() === tag);
+    if (vorhandene.length > 0) {
+      const e = vorhandene[0];
+      setBeginnUhr(new Date(e.beginn).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));
+      if (e.ende) setEndeUhr(new Date(e.ende).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));
+      const mat = e.materialien;
+      if (mat?.pausen) setPausen(mat.pausen);
+      if (mat?.positionen?.length > 0) setPositionen(mat.positionen.map(p => ({
+        baustelle_id: String(p.baustelle_id || ""),
+        stunden: String(p.stunden || ""),
+        taetigkeit: p.taetigkeit || "",
+      })));
+    } else {
+      setBeginnUhr("07:00"); setEndeUhr("16:00");
+      setPausen([]); setPositionen([{baustelle_id:"",stunden:"",taetigkeit:""}]);
+      setUebExtra(""); setFreizeit("");
+    }
+  }
+
+  // Berechnung
+  const berechne = () => {
     try {
-      const [bh, bm] = beginnUhr.split(":").map(Number);
-      const [eh, em] = endeUhr.split(":").map(Number);
-      const bruttoMin = (eh * 60 + em) - (bh * 60 + bm);
+      const [bh,bm] = beginnUhr.split(":").map(Number);
+      const [eh,em] = endeUhr.split(":").map(Number);
       let pauseMin = 0;
       pausen.forEach(p => {
         if (p.von && p.bis) {
-          const [ph, pm2] = p.von.split(":").map(Number);
-          const [qh, qm] = p.bis.split(":").map(Number);
-          pauseMin += (qh * 60 + qm) - (ph * 60 + pm2);
+          const [ph,pm] = p.von.split(":").map(Number);
+          const [qh,qm] = p.bis.split(":").map(Number);
+          pauseMin += Math.max(0,(qh*60+qm)-(ph*60+pm));
         }
       });
-      const netto = Math.max(0, bruttoMin - pauseMin) / 60;
-      const soll = 8.0;
-      return { soll: soll.toFixed(2), ist: netto.toFixed(2), netto };
-    } catch { return { soll:"8,00", ist:"0,00", netto:0 }; }
+      const bruttoMin = (eh*60+em)-(bh*60+bm);
+      const nettoMin = Math.max(0, bruttoMin - pauseMin);
+      return { brutto: bruttoMin/60, pause: pauseMin, netto: nettoMin/60 };
+    } catch { return { brutto:0, pause:0, netto:0 }; }
   };
+  const { brutto, pause, netto } = berechne();
 
-  const { soll, ist, netto } = berechneSollIst();
-
-  async function eintragSpeichern(abgeben = false) {
+  async function speichernFn() {
+    if (netto <= 0) { showToast("Bitte Arbeitszeit eingeben", "err"); return; }
     setSpeichern(true);
     const datum = `${jahr}-${String(monat+1).padStart(2,"0")}-${String(gewTag).padStart(2,"0")}`;
     const res = await apiFetch("/api/zeiterfassung/manuell", {
       method: "POST",
       body: JSON.stringify({
-        datum,
-        beginn_uhr: beginnUhr,
-        ende_uhr: endeUhr,
+        datum, beginn_uhr: beginnUhr, ende_uhr: endeUhr,
         pausen: pausen.filter(p => p.von && p.bis),
         positionen: positionen.filter(p => p.stunden).map(p => ({
           baustelle_id: p.baustelle_id ? Number(p.baustelle_id) : null,
           stunden: Number(p.stunden),
           taetigkeit: p.taetigkeit || null,
         })),
-        ueberstunden_extra: Number(uebExtra) || 0,
-        freizeit_genommen: Number(freizeit) || 0,
-        notizen: notizen || null,
+        ueberstunden_extra: Number(uebExtra)||0,
+        freizeit_genommen: Number(freizeit)||0,
       }),
     });
     if (res?.ok) {
       const d = await res.json();
-      showToast(`✓ ${d.netto_stunden}h gespeichert (Überstunden: ${d.ueberstunden > 0 ? "+" : ""}${d.ueberstunden}h)`);
-      setPausen([{von:"",bis:""}]);
-      setPositionen([{baustelle_id:"",stunden:"",taetigkeit:""}]);
-      setUebExtra(""); setFreizeit(""); setNotizen("");
+      showToast(`✓ ${d.netto_stunden}h gespeichert`);
       ladeAlles();
+      setGewTag(null);
     } else {
-      const err = await res?.json().catch(() => ({}));
-      showToast(err?.detail || "Fehler beim Speichern", "err");
+      const err = await res?.json().catch(()=>({}));
+      showToast(err?.detail || "Fehler", "err");
     }
     setSpeichern(false);
   }
 
   // Kalender
   const erster = new Date(jahr, monat, 1).getDay();
-  const wochentag = erster === 0 ? 6 : erster - 1;
-  const tageImMonat = new Date(jahr, monat+1, 0).getDate();
-  const stundenProTag = {};
+  const wt = erster === 0 ? 6 : erster-1;
+  const tage = new Date(jahr, monat+1, 0).getDate();
+  const stdProTag = {};
   eintraege.forEach(e => {
-    const tag = new Date(e.datum).getDate();
-    stundenProTag[tag] = (stundenProTag[tag] || 0) + (e.arbeitsstunden || 0);
+    const t = new Date(e.datum).getDate();
+    stdProTag[t] = (stdProTag[t]||0) + (e.arbeitsstunden||0);
   });
-  const gesamtMonat = Object.values(stundenProTag).reduce((s,h) => s+h, 0);
-  const tagEintraege = eintraege.filter(e => new Date(e.datum).getDate() === gewTag && new Date(e.datum).getMonth() === monat);
-  const datum = `${jahr}-${String(monat+1).padStart(2,"0")}-${String(gewTag).padStart(2,"0")}`;
-  const tagName = new Date(jahr, monat, gewTag).toLocaleDateString("de-DE", { weekday:"short" });
-  const kw = Math.ceil((new Date(jahr, monat, gewTag).getTime() - new Date(jahr, 0, 1).getTime()) / (7 * 24 * 3600000)) + 1;
-
-  function vorTag() { if (gewTag > 1) setGewTag(t => t-1); else { if (monat > 0) { setMonat(m=>m-1); setGewTag(new Date(jahr, monat, 0).getDate()); } else { setJahr(y=>y-1); setMonat(11); setGewTag(31); } } }
-  function nachTag() { if (gewTag < tageImMonat) setGewTag(t => t+1); else { if (monat < 11) { setMonat(m=>m+1); setGewTag(1); } else { setJahr(y=>y+1); setMonat(0); setGewTag(1); } } }
+  const gesamtMonat = Object.values(stdProTag).reduce((s,h)=>s+h,0);
+  const tagEintraege = gewTag ? eintraege.filter(e => new Date(e.datum).getDate()===gewTag) : [];
+  const datum = gewTag ? `${jahr}-${String(monat+1).padStart(2,"0")}-${String(gewTag).padStart(2,"0")}` : "";
+  const kw = gewTag ? Math.ceil((new Date(jahr,monat,gewTag).getTime()-new Date(jahr,0,1).getTime())/(7*24*3600000))+1 : 0;
+  const tagName = gewTag ? new Date(jahr,monat,gewTag).toLocaleDateString("de-DE",{weekday:"long"}) : "";
 
   if (laden) return <Lader />;
 
-  return (
-    <div style={{ fontFamily:"'Inter',system-ui,sans-serif" }}>
+  // ── ANSICHT 1: Kalender ──────────────────────────────────────────────────────
+  if (!gewTag) return (
+    <div style={{ maxWidth:520, margin:"0 auto" }}>
 
       {/* Header */}
       <div style={{ marginBottom:20 }}>
-        <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#f59e0b", borderRadius:4, padding:"4px 12px", fontSize:11, fontWeight:800, marginBottom:10 }}>
+        <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#f59e0b", borderRadius:6, padding:"4px 12px", fontSize:11, fontWeight:800, marginBottom:10 }}>
           📅 ZEITERFASSUNG
         </div>
-        <h1 style={{ fontSize:28, fontWeight:800, color:"#0f1923", margin:"0 0 4px", letterSpacing:"-0.5px" }}>Arbeitszeiten</h1>
-        <p style={{ color:"#64748b", fontSize:14, margin:0 }}>Tag wählen, Zeiten und Tätigkeiten eintragen.</p>
+        <h1 style={{ fontSize:26, fontWeight:800, color:"#0f1923", margin:"0 0 2px" }}>Arbeitszeiten</h1>
+        <p style={{ color:"#64748b", fontSize:13, margin:0 }}>Tag antippen zum Eintragen</p>
       </div>
 
-      {/* Überstundenkonto */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12, marginBottom:20 }}>
-        {[
-          ["Monat", MONATE[monat], "#f59e0b"],
-          ["Stunden " + MONATE[monat], gesamtMonat.toFixed(1) + " h", "#0f1923"],
-          ["Überstundenkonto", (ueberstunden > 0 ? "+" : "") + ueberstunden.toFixed(1) + " h", ueberstunden >= 0 ? "#16a34a" : "#dc2626"],
-        ].map(([label, wert, farbe]) => (
-          <div key={label} style={{ ...S.card, padding:"14px 18px" }}>
-            <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>{label}</div>
-            <div style={{ fontSize:20, fontWeight:800, color:farbe }}>{wert}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) 400px", gap:20, alignItems:"start" }}>
-
-        {/* ── Kalender ── */}
-        <div style={{ ...S.card, padding:0 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #e8edf2" }}>
-            <button onClick={() => { if (monat===0){setMonat(11);setJahr(y=>y-1);}else setMonat(m=>m-1); setGewTag(1); }}
-              style={{ width:34, height:34, border:"2px solid #0f1923", borderRadius:4, background:"white", cursor:"pointer", fontSize:16, fontWeight:700 }}>‹</button>
-            <h2 style={{ fontSize:18, fontWeight:800, margin:0 }}>{MONATE[monat]} {jahr}</h2>
-            <button onClick={() => { if (monat===11){setMonat(0);setJahr(y=>y+1);}else setMonat(m=>m+1); setGewTag(1); }}
-              style={{ width:34, height:34, border:"2px solid #0f1923", borderRadius:4, background:"white", cursor:"pointer", fontSize:16, fontWeight:700 }}>›</button>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", borderBottom:"1px solid #e8edf2" }}>
-            {WOCHENTAGE.map(w => <div key={w} style={{ textAlign:"center", padding:"8px 0", fontSize:11, fontWeight:700, color:"#94a3b8" }}>{w}</div>)}
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)" }}>
-            {Array.from({length:wochentag}).map((_,i) => <div key={`l${i}`} style={{ borderRight:"1px solid #f1f5f9", borderBottom:"1px solid #f1f5f9", minHeight:56 }} />)}
-            {Array.from({length:tageImMonat}).map((_,i) => {
-              const tag = i+1;
-              const h = stundenProTag[tag];
-              const istHeute_ = tag===heute.getDate() && monat===heute.getMonth() && jahr===heute.getFullYear();
-              const gew = tag===gewTag;
-              return (
-                <div key={tag} onClick={() => setGewTag(tag)} style={{
-                  borderRight:"1px solid #e8edf2", borderBottom:"1px solid #e8edf2", minHeight:56,
-                  padding:"8px 6px", cursor:"pointer",
-                  background: gew ? "#f59e0b" : istHeute_ ? "#0f1923" : "white",
-                }}
-                  onMouseEnter={e => { if (!gew && !istHeute_) e.currentTarget.style.background="#fef9c3"; }}
-                  onMouseLeave={e => { if (!gew && !istHeute_) e.currentTarget.style.background="white"; }}
-                >
-                  <div style={{ fontSize:15, fontWeight:700, color: gew||istHeute_ ? (gew?"#0f1923":"white") : "#0f1923" }}>{tag}</div>
-                  {h > 0 && <div style={{ fontSize:10, fontWeight:700, color: gew?"#0f1923":"#f59e0b", marginTop:2 }}>{h.toFixed(1)}h</div>}
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ display:"flex", justifyContent:"space-between", padding:"12px 20px", borderTop:"2px solid #0f1923" }}>
-            <span style={{ fontSize:13, color:"#64748b" }}>Summe {MONATE[monat]}:</span>
-            <span style={{ fontSize:18, fontWeight:800 }}>{gesamtMonat.toFixed(1)} h</span>
+      {/* Stats */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+        <div style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:10, padding:"12px 16px" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>Stunden {MONATE[monat]}</div>
+          <div style={{ fontSize:22, fontWeight:800, color:"#0f1923" }}>{gesamtMonat.toFixed(1)} h</div>
+        </div>
+        <div style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:10, padding:"12px 16px" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:4 }}>Überstundenkonto</div>
+          <div style={{ fontSize:22, fontWeight:800, color: ueberstunden>=0?"#16a34a":"#dc2626" }}>
+            {ueberstunden>0?"+":""}{ueberstunden.toFixed(1)} h
           </div>
         </div>
+      </div>
 
-        {/* ── Rechte Spalte: Eingabe ── */}
-        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      {/* Kalender */}
+      <div style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:12, overflow:"hidden" }}>
+        {/* Monat Navigation */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 16px", borderBottom:"1px solid #f1f5f9" }}>
+          <button onClick={() => { if(monat===0){setMonat(11);setJahr(y=>y-1);}else setMonat(m=>m-1); }}
+            style={{ width:36,height:36,border:"1.5px solid #e8edf2",borderRadius:8,background:"white",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center" }}>‹</button>
+          <span style={{ fontSize:16, fontWeight:700 }}>{MONATE[monat]} {jahr}</span>
+          <button onClick={() => { if(monat===11){setMonat(0);setJahr(y=>y+1);}else setMonat(m=>m+1); }}
+            style={{ width:36,height:36,border:"1.5px solid #e8edf2",borderRadius:8,background:"white",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center" }}>›</button>
+        </div>
 
-          {/* Datum + KW */}
-          <div style={{ ...S.card, padding:"14px 18px", textAlign:"center" }}>
-            <div style={{ fontSize:14, fontWeight:700, color:"#0f1923" }}>
-              {tagName}. {String(gewTag).padStart(2,"0")}.{String(monat+1).padStart(2,"0")}.{jahr} · KW{kw}
-            </div>
-          </div>
+        {/* Wochentage */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", background:"#f8fafc" }}>
+          {WOCHENTAGE.map(w => (
+            <div key={w} style={{ textAlign:"center", padding:"8px 0", fontSize:11, fontWeight:700, color: w==="Sa"||w==="So" ? "#94a3b8" : "#475569" }}>{w}</div>
+          ))}
+        </div>
 
-          {/* Arbeitszeit */}
-          <div style={S.card}>
-            <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>Täglicher Arbeitsbeginn / -ende:</div>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-              <span style={{ fontSize:13, color:"#64748b", width:90 }}>Arbeitszeit:</span>
-              <span style={{ fontSize:13 }}>von</span>
-              <input type="time" value={beginnUhr} onChange={e => setBeginnUhr(e.target.value)}
-                style={{ border:"2px solid #f59e0b", borderRadius:4, padding:"5px 8px", fontSize:14, outline:"none", width:90 }} />
-              <span style={{ fontSize:13 }}>bis</span>
-              <input type="time" value={endeUhr} onChange={e => setEndeUhr(e.target.value)}
-                style={{ border:"2px solid #f59e0b", borderRadius:4, padding:"5px 8px", fontSize:14, outline:"none", width:90 }} />
-              <span style={{ fontSize:13 }}>Uhr</span>
-            </div>
-
-            {/* Pausen */}
-            <div style={{ fontSize:13, fontWeight:800, margin:"12px 0 8px" }}>Pausen:</div>
-            {pausen.map((p, i) => (
-              <div key={i} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                <span style={{ fontSize:13, color:"#64748b", width:90 }}>Pause {i+1}:</span>
-                <span style={{ fontSize:13 }}>von</span>
-                <input type="time" value={p.von} onChange={e => { const n=[...pausen]; n[i]={...n[i],von:e.target.value}; setPausen(n); }}
-                  style={{ border:"2px solid #e8edf2", borderRadius:4, padding:"5px 8px", fontSize:14, outline:"none", width:90 }} />
-                <span style={{ fontSize:13 }}>bis</span>
-                <input type="time" value={p.bis} onChange={e => { const n=[...pausen]; n[i]={...n[i],bis:e.target.value}; setPausen(n); }}
-                  style={{ border:"2px solid #e8edf2", borderRadius:4, padding:"5px 8px", fontSize:14, outline:"none", width:90 }} />
-                <span style={{ fontSize:13 }}>Uhr</span>
-                {pausen.length > 1 && <button onClick={() => setPausen(pausen.filter((_,j)=>j!==i))} style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:16 }}>✕</button>}
-              </div>
-            ))}
-            <button onClick={() => setPausen([...pausen,{von:"",bis:""}])}
-              style={{ ...S.btnSm("white"), marginTop:4, fontSize:12 }}>+ Pause hinzufügen</button>
-          </div>
-
-          {/* Baustellen / Kostenstellen */}
-          <div style={S.card}>
-            <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>Kostenstellen:</div>
-            {positionen.map((pos, i) => (
-              <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px", gap:8, marginBottom:10 }}>
-                <div>
-                  <span style={S.label}>Baustelle</span>
-                  <select value={pos.baustelle_id} onChange={e => { const n=[...positionen]; n[i]={...n[i],baustelle_id:e.target.value}; setPositionen(n); }} style={S.select}>
-                    <option value="">— wählen —</option>
-                    {baustellen.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <span style={S.label}>Std.</span>
-                  <input type="number" step="0.25" min="0" value={pos.stunden}
-                    onChange={e => { const n=[...positionen]; n[i]={...n[i],stunden:e.target.value}; setPositionen(n); }}
-                    placeholder="Std." style={{ ...S.input, textAlign:"center" }} />
-                </div>
-                <div style={{ gridColumn:"1/-1" }}>
-                  <input value={pos.taetigkeit}
-                    onChange={e => { const n=[...positionen]; n[i]={...n[i],taetigkeit:e.target.value}; setPositionen(n); }}
-                    placeholder="Was wurde gemacht? z.B. Verkabelung EG"
-                    style={{ ...S.input, fontSize:13 }} />
-                </div>
-                {positionen.length > 1 && (
-                  <button onClick={() => setPositionen(positionen.filter((_,j)=>j!==i))}
-                    style={{ gridColumn:"1/-1", ...S.btnSm("#fee2e2"), color:"#dc2626", fontSize:12 }}>Baustelle entfernen</button>
+        {/* Tage */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)" }}>
+          {Array.from({length:wt}).map((_,i)=><div key={`l${i}`} />)}
+          {Array.from({length:tage}).map((_,i)=>{
+            const tag=i+1;
+            const h=stdProTag[tag];
+            const istHeuteFlag=tag===heute.getDate()&&monat===heute.getMonth()&&jahr===heute.getFullYear();
+            const hatEintrag=h>0;
+            const wochentag=new Date(jahr,monat,tag).getDay();
+            const istWE=wochentag===0||wochentag===6;
+            return (
+              <div key={tag} onClick={() => tagAnklicken(tag)}
+                style={{
+                  padding:"10px 4px 8px", textAlign:"center", cursor:"pointer",
+                  borderTop:"1px solid #f1f5f9",
+                  background: istHeuteFlag ? "#0f1923" : "white",
+                  position:"relative", transition:"background 0.1s",
+                }}
+                onMouseEnter={e=>{ if(!istHeuteFlag) e.currentTarget.style.background="#fef9c3"; }}
+                onMouseLeave={e=>{ if(!istHeuteFlag) e.currentTarget.style.background="white"; }}
+              >
+                <div style={{ fontSize:15, fontWeight: istHeuteFlag?800:500, color: istHeuteFlag?"white": istWE?"#94a3b8":"#0f1923" }}>{tag}</div>
+                {hatEintrag && (
+                  <div style={{ fontSize:10, fontWeight:700, color: istHeuteFlag?"#f59e0b":"#f59e0b", marginTop:2 }}>{h.toFixed(1)}h</div>
+                )}
+                {hatEintrag && (
+                  <div style={{ width:4, height:4, background:"#f59e0b", borderRadius:"50%", margin:"3px auto 0" }} />
                 )}
               </div>
-            ))}
-            <button onClick={() => setPositionen([...positionen,{baustelle_id:"",stunden:"",taetigkeit:""}])}
-              style={{ ...S.btnSm("white"), fontSize:12 }}>+ Baustelle hinzufügen</button>
+            );
+          })}
+        </div>
 
-            {/* Soll/Ist Anzeige */}
-            <div style={{ textAlign:"center", fontSize:13, color:"#64748b", marginTop:14, padding:"10px", background:"#f8fafc", borderRadius:4 }}>
-              Summe Soll: <strong>{soll}</strong> · Summe Ist: <strong style={{ color: Number(ist) >= Number(soll) ? "#16a34a" : "#dc2626" }}>{ist}</strong>
-            </div>
-          </div>
-
-          {/* Überstunden / Freizeit */}
-          <div style={S.card}>
-            <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>Überstunden / Freizeit:</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-              <div>
-                <span style={S.label}>+ Überstunden</span>
-                <input type="number" step="0.25" min="0" value={uebExtra} onChange={e => setUebExtra(e.target.value)}
-                  placeholder="0.0 h" style={S.input} />
-                <div style={{ fontSize:11, color:"#94a3b8", marginTop:3 }}>Werden addiert</div>
-              </div>
-              <div>
-                <span style={S.label}>- Freizeit genommen</span>
-                <input type="number" step="0.25" min="0" value={freizeit} onChange={e => setFreizeit(e.target.value)}
-                  placeholder="0.0 h" style={S.input} />
-                <div style={{ fontSize:11, color:"#94a3b8", marginTop:3 }}>Vom Konto abgezogen</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Notizen */}
-          <div style={S.card}>
-            <span style={S.label}>Notizen (optional)</span>
-            <textarea value={notizen} onChange={e => setNotizen(e.target.value)}
-              rows={2} placeholder="Besonderheiten..."
-              style={{ ...S.input, resize:"vertical" }} />
-          </div>
-
-          {/* Buttons */}
-          <div>
-            <button onClick={() => eintragSpeichern(false)} disabled={speichern}
-              style={S.btn("#f59e0b")}>
-              {speichern ? "⏳ Wird gespeichert..." : "Zwischenspeichern"}
-            </button>
-            <button onClick={() => eintragSpeichern(true)} disabled={speichern}
-              style={S.btn("#16a34a", "white")}>
-              ✓ Verbindlich abgeben
-            </button>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              <button onClick={vorTag} style={S.btn("white")}>◀ vorheriger Tag</button>
-              <button onClick={nachTag} style={S.btn("white")}>nächster Tag ▶</button>
-            </div>
-          </div>
-
-          {/* Einträge des Tages */}
-          {tagEintraege.length > 0 && (
-            <div style={S.card}>
-              <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>Einträge am {datum}</div>
-              {tagEintraege.map(e => (
-                <div key={e.id} style={{ padding:"10px 0", borderBottom:"1px solid #f1f5f9" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between" }}>
-                    <div>
-                      <div style={{ fontWeight:700, fontSize:14 }}>
-                        {new Date(e.beginn).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} –{" "}
-                        {e.ende ? new Date(e.ende).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "—"} Uhr
-                      </div>
-                      <div style={{ fontSize:12, color:"#64748b" }}>
-                        Pause: {e.pause_minuten} Min · Netto: {e.arbeitsstunden?.toFixed(2)} h
-                        {e.ueberstunden !== 0 && <span style={{ color: e.ueberstunden > 0 ? "#16a34a" : "#dc2626" }}> · ÜS: {e.ueberstunden > 0 ? "+" : ""}{e.ueberstunden?.toFixed(2)}h</span>}
-                      </div>
-                      {e.baustelle_name && <div style={{ fontSize:12, color:"#475569" }}>🏗 {e.baustelle_name}</div>}
-                      {e.taetigkeit && <div style={{ fontSize:12, color:"#475569" }}>{e.taetigkeit}</div>}
-                    </div>
-                    <button onClick={async () => {
-                      if (confirm("Eintrag löschen?")) {
-                        await apiFetch(`/api/zeiterfassung/${e.id}`, { method:"DELETE" });
-                        showToast("Gelöscht"); ladeAlles();
-                      }
-                    }} style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:18 }}>🗑</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        {/* Footer */}
+        <div style={{ display:"flex", justifyContent:"space-between", padding:"12px 16px", borderTop:"1px solid #f1f5f9", background:"#f8fafc" }}>
+          <span style={{ fontSize:13, color:"#64748b" }}>Gesamt {MONATE[monat]}</span>
+          <span style={{ fontSize:15, fontWeight:800 }}>{gesamtMonat.toFixed(1)} h</span>
         </div>
       </div>
+    </div>
+  );
+
+  // ── ANSICHT 2: Tagesformular ─────────────────────────────────────────────────
+  return (
+    <div style={{ maxWidth:520, margin:"0 auto" }}>
+
+      {/* Back + Datum Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
+        <button onClick={() => setGewTag(null)} style={{
+          width:40, height:40, border:"1.5px solid #e8edf2", borderRadius:10,
+          background:"white", cursor:"pointer", fontSize:20, display:"flex",
+          alignItems:"center", justifyContent:"center", flexShrink:0
+        }}>←</button>
+        <div>
+          <div style={{ fontSize:13, color:"#94a3b8", fontWeight:600 }}>KW{kw}</div>
+          <div style={{ fontSize:20, fontWeight:800, color:"#0f1923" }}>{tagName}, {String(gewTag).padStart(2,"0")}. {MONATE[monat]} {jahr}</div>
+        </div>
+        {tagEintraege.length > 0 && (
+          <div style={{ marginLeft:"auto", background:"#f59e0b", borderRadius:8, padding:"4px 12px", fontSize:13, fontWeight:800 }}>
+            {tagEintraege.reduce((s,e)=>s+(e.arbeitsstunden||0),0).toFixed(1)} h
+          </div>
+        )}
+      </div>
+
+      {/* ── Block 1: Arbeitszeit ── */}
+      <div style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:12, padding:20, marginBottom:12 }}>
+        <div style={{ fontSize:13, fontWeight:800, color:"#0f1923", marginBottom:14 }}>⏰ Arbeitszeit</div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>VON</div>
+            <input type="time" value={beginnUhr} onChange={e=>setBeginnUhr(e.target.value)} style={{
+              width:"100%", padding:"12px", fontSize:18, fontWeight:700, border:"2px solid #f59e0b",
+              borderRadius:8, boxSizing:"border-box", outline:"none", textAlign:"center"
+            }}/>
+          </div>
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>BIS</div>
+            <input type="time" value={endeUhr} onChange={e=>setEndeUhr(e.target.value)} style={{
+              width:"100%", padding:"12px", fontSize:18, fontWeight:700, border:"2px solid #f59e0b",
+              borderRadius:8, boxSizing:"border-box", outline:"none", textAlign:"center"
+            }}/>
+          </div>
+        </div>
+
+        {/* Pausen */}
+        <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:"#64748b" }}>PAUSEN</div>
+            <button onClick={()=>setPausen([...pausen,{von:"",bis:""}])} style={{
+              background:"#f8fafc", border:"1px solid #e8edf2", borderRadius:6,
+              padding:"4px 10px", fontSize:12, fontWeight:600, cursor:"pointer", color:"#475569"
+            }}>+ Pause</button>
+          </div>
+          {pausen.length === 0 && (
+            <div style={{ fontSize:13, color:"#94a3b8", fontStyle:"italic" }}>Keine Pause eingetragen</div>
+          )}
+          {pausen.map((p,i)=>(
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+              <input type="time" value={p.von} onChange={e=>{const n=[...pausen];n[i]={...n[i],von:e.target.value};setPausen(n);}}
+                style={{ flex:1, padding:"9px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, outline:"none", textAlign:"center" }}/>
+              <span style={{ color:"#94a3b8", fontWeight:700 }}>–</span>
+              <input type="time" value={p.bis} onChange={e=>{const n=[...pausen];n[i]={...n[i],bis:e.target.value};setPausen(n);}}
+                style={{ flex:1, padding:"9px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, outline:"none", textAlign:"center" }}/>
+              <button onClick={()=>setPausen(pausen.filter((_,j)=>j!==i))} style={{ background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:18,padding:"0 4px" }}>✕</button>
+            </div>
+          ))}
+        </div>
+
+        {/* Automatische Berechnung */}
+        <div style={{ background:"#f8fafc", borderRadius:8, padding:"10px 14px", marginTop:14, display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, textAlign:"center" }}>
+          <div>
+            <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", marginBottom:2 }}>BRUTTO</div>
+            <div style={{ fontSize:16, fontWeight:800 }}>{brutto.toFixed(2)}h</div>
+          </div>
+          <div>
+            <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", marginBottom:2 }}>PAUSE</div>
+            <div style={{ fontSize:16, fontWeight:800 }}>{pause}min</div>
+          </div>
+          <div style={{ background:"#f59e0b", borderRadius:6, padding:"4px 0" }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#92400e", marginBottom:2 }}>NETTO</div>
+            <div style={{ fontSize:16, fontWeight:800 }}>{netto.toFixed(2)}h</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Block 2: Baustellen ── */}
+      <div style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:12, padding:20, marginBottom:12 }}>
+        <div style={{ fontSize:13, fontWeight:800, color:"#0f1923", marginBottom:14 }}>🏗 Baustellen & Tätigkeiten</div>
+        {positionen.map((pos,i)=>(
+          <div key={i} style={{ marginBottom:16, paddingBottom:16, borderBottom: i<positionen.length-1?"1px solid #f1f5f9":"none" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:8, marginBottom:8, alignItems:"flex-end" }}>
+              <div>
+                <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>BAUSTELLE</div>
+                <select value={pos.baustelle_id} onChange={e=>{const n=[...positionen];n[i]={...n[i],baustelle_id:e.target.value};setPositionen(n);}}
+                  style={{ width:"100%", padding:"10px 12px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, background:"white", outline:"none" }}>
+                  <option value="">— wählen —</option>
+                  {baustellen.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div style={{ width:80 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>STUNDEN</div>
+                <input type="number" step="0.25" min="0" value={pos.stunden}
+                  onChange={e=>{const n=[...positionen];n[i]={...n[i],stunden:e.target.value};setPositionen(n);}}
+                  placeholder="h" style={{ width:"100%", padding:"10px 8px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, boxSizing:"border-box", textAlign:"center", outline:"none" }}/>
+              </div>
+            </div>
+            <div style={{ marginBottom: positionen.length>1?8:0 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>TÄTIGKEIT</div>
+              <input value={pos.taetigkeit}
+                onChange={e=>{const n=[...positionen];n[i]={...n[i],taetigkeit:e.target.value};setPositionen(n);}}
+                placeholder="z.B. Verkabelung EG, Schalterdosen gesetzt"
+                style={{ width:"100%", padding:"10px 12px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, boxSizing:"border-box", outline:"none" }}/>
+            </div>
+            {positionen.length>1 && (
+              <button onClick={()=>setPositionen(positionen.filter((_,j)=>j!==i))}
+                style={{ background:"#fee2e2", border:"none", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:600, cursor:"pointer", color:"#dc2626" }}>
+                Entfernen
+              </button>
+            )}
+          </div>
+        ))}
+        <button onClick={()=>setPositionen([...positionen,{baustelle_id:"",stunden:"",taetigkeit:""}])}
+          style={{ width:"100%", padding:"10px", background:"#f8fafc", border:"1.5px dashed #e8edf2", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", color:"#64748b" }}>
+          + Weitere Baustelle
+        </button>
+      </div>
+
+      {/* ── Block 3: Überstunden (ausklappbar) ── */}
+      <details style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:12, marginBottom:16, overflow:"hidden" }}>
+        <summary style={{ padding:"14px 20px", fontSize:13, fontWeight:700, cursor:"pointer", color:"#475569", listStyle:"none", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span>⚡ Überstunden / Freizeit (optional)</span>
+          <span style={{ fontSize:11, color:"#94a3b8" }}>Tippen zum Öffnen</span>
+        </summary>
+        <div style={{ padding:"0 20px 20px", borderTop:"1px solid #f1f5f9" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginTop:14 }}>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>+ ÜBERSTUNDEN</div>
+              <input type="number" step="0.25" value={uebExtra} onChange={e=>setUebExtra(e.target.value)}
+                placeholder="0.0 h" style={{ width:"100%", padding:"10px 12px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, boxSizing:"border-box", outline:"none" }}/>
+              <div style={{ fontSize:11, color:"#94a3b8", marginTop:4 }}>Werden addiert</div>
+            </div>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", marginBottom:6 }}>- FREIZEIT</div>
+              <input type="number" step="0.25" value={freizeit} onChange={e=>setFreizeit(e.target.value)}
+                placeholder="0.0 h" style={{ width:"100%", padding:"10px 12px", fontSize:14, border:"1.5px solid #e8edf2", borderRadius:8, boxSizing:"border-box", outline:"none" }}/>
+              <div style={{ fontSize:11, color:"#94a3b8", marginTop:4 }}>Vom Konto abgezogen</div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {/* ── Speichern Buttons ── */}
+      <button onClick={speichernFn} disabled={speichern} style={{
+        width:"100%", padding:"16px", background: speichern?"#94a3b8":"#f59e0b",
+        border:"none", borderRadius:12, fontSize:16, fontWeight:800,
+        cursor: speichern?"not-allowed":"pointer", marginBottom:10, color:"#0f1923"
+      }}>
+        {speichern ? "⏳ Wird gespeichert..." : "✓ Eintrag speichern"}
+      </button>
+
+      {/* Vorhandene Einträge */}
+      {tagEintraege.length > 0 && (
+        <div style={{ background:"white", border:"1.5px solid #e8edf2", borderRadius:12, padding:16, marginTop:8 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#94a3b8", marginBottom:10 }}>GESPEICHERTE EINTRÄGE</div>
+          {tagEintraege.map(e=>(
+            <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid #f1f5f9" }}>
+              <div>
+                <div style={{ fontSize:14, fontWeight:700 }}>
+                  {new Date(e.beginn).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} – {e.ende?new Date(e.ende).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}):"—"} Uhr
+                </div>
+                <div style={{ fontSize:12, color:"#64748b" }}>
+                  {e.pause_minuten}min Pause · {e.arbeitsstunden?.toFixed(2)}h netto
+                  {e.ueberstunden!==0&&<span style={{color:e.ueberstunden>0?"#16a34a":"#dc2626"}}> · {e.ueberstunden>0?"+":""}{e.ueberstunden?.toFixed(2)}h ÜS</span>}
+                </div>
+                {e.baustelle_name&&<div style={{fontSize:12,color:"#475569"}}>🏗 {e.baustelle_name}</div>}
+                {e.taetigkeit&&<div style={{fontSize:12,color:"#475569"}}>{e.taetigkeit}</div>}
+              </div>
+              <button onClick={async()=>{ if(confirm("Löschen?")){ await apiFetch(`/api/zeiterfassung/${e.id}`,{method:"DELETE"}); showToast("Gelöscht"); ladeAlles(); setGewTag(null); }}}
+                style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:20,padding:"0 4px"}}>🗑</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ height:20 }} />
     </div>
   );
 }

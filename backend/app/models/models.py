@@ -32,6 +32,21 @@ class BaustelleStatus(str, enum.Enum):
     abgeschlossen = "abgeschlossen"
     archiviert    = "archiviert"
 
+class AuftragTyp(str, enum.Enum):
+    wartung       = "wartung"
+    kundendienst  = "kundendienst"
+    installation  = "installation"
+    reparatur     = "reparatur"
+    inspektion    = "inspektion"
+    notfall       = "notfall"
+    sonstiges     = "sonstiges"
+
+class AuftragStatus(str, enum.Enum):
+    offen          = "offen"
+    in_bearbeitung = "in_bearbeitung"
+    abgeschlossen  = "abgeschlossen"
+    storniert      = "storniert"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -78,11 +93,11 @@ class Baustelle(Base):
     erstellt_am       = Column(DateTime(timezone=True), server_default=func.now())
     geaendert_am      = Column(DateTime(timezone=True), onupdate=func.now())
 
-    bauleiter      = relationship("User", foreign_keys=[bauleiter_id])
-    erstellt_von   = relationship("User", foreign_keys=[erstellt_von_id])
-    zeiteintraege  = relationship("Zeiteintrag", back_populates="baustelle")
+    bauleiter       = relationship("User", foreign_keys=[bauleiter_id])
+    erstellt_von    = relationship("User", foreign_keys=[erstellt_von_id])
+    zeiteintraege   = relationship("Zeiteintrag", back_populates="baustelle")
     mitarbeiter_rel = relationship("BaustelleMitarbeiter", back_populates="baustelle")
-    regiezettel    = relationship("Regiezettel", back_populates="baustelle")
+    regiezettel     = relationship("Regiezettel", back_populates="baustelle")
 
 
 class BaustelleMitarbeiter(Base):
@@ -179,3 +194,71 @@ class AuditLog(Base):
     erstellt_am  = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="audit_logs")
+
+
+# ── Aufträge ──────────────────────────────────────────────────────────────────
+
+class Auftrag(Base):
+    __tablename__ = "auftraege"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    auftragsnummer   = Column(String(50), unique=True, nullable=False)
+    titel            = Column(String(300), nullable=False)
+    typ              = Column(SAEnum(AuftragTyp, name="auftragtyp"), default=AuftragTyp.kundendienst)
+    status           = Column(SAEnum(AuftragStatus, name="auftragstatus"), default=AuftragStatus.offen)
+    beschreibung     = Column(Text, nullable=True)
+    kunde_name       = Column(String(200), nullable=False)
+    kunde_adresse    = Column(String(500), nullable=True)
+    kunde_telefon    = Column(String(50), nullable=True)
+    kunde_email      = Column(String(255), nullable=True)
+    kunde_notiz      = Column(Text, nullable=True)
+    termin_datum     = Column(Date, nullable=True)
+    termin_von       = Column(String(5), nullable=True)
+    termin_bis       = Column(String(5), nullable=True)
+    baustelle_id     = Column(Integer, ForeignKey("baustellen.id"), nullable=True)
+    erstellt_von_id  = Column(Integer, ForeignKey("users.id"), nullable=False)
+    erstellt_am      = Column(DateTime(timezone=True), server_default=func.now())
+    geaendert_am     = Column(DateTime(timezone=True), onupdate=func.now())
+
+    baustelle    = relationship("Baustelle", foreign_keys=[baustelle_id])
+    erstellt_von = relationship("User", foreign_keys=[erstellt_von_id])
+    zuweisungen  = relationship("AuftragZuweisung", back_populates="auftrag", cascade="all, delete-orphan")
+    regiezettel_auftraege = relationship("AuftragRegiezettel", back_populates="auftrag", cascade="all, delete-orphan")
+
+
+class AuftragZuweisung(Base):
+    __tablename__ = "auftrag_zuweisungen"
+
+    id            = Column(Integer, primary_key=True)
+    auftrag_id    = Column(Integer, ForeignKey("auftraege.id"), nullable=False)
+    user_id       = Column(Integer, ForeignKey("users.id"), nullable=False)
+    zugewiesen_am = Column(DateTime(timezone=True), server_default=func.now())
+
+    auftrag = relationship("Auftrag", back_populates="zuweisungen")
+    user    = relationship("User", foreign_keys=[user_id])
+
+
+class AuftragRegiezettel(Base):
+    __tablename__ = "auftrag_regiezettel"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    auftrag_id               = Column(Integer, ForeignKey("auftraege.id"), nullable=False)
+    erstellt_von_id          = Column(Integer, ForeignKey("users.id"), nullable=False)
+    datum                    = Column(Date, nullable=False)
+    beginn_uhr               = Column(String(5), nullable=True)
+    ende_uhr                 = Column(String(5), nullable=True)
+    arbeitsstunden           = Column(Float, nullable=True)
+    pause_minuten            = Column(Integer, default=0)
+    mitarbeiter_namen        = Column(JSON, nullable=True)
+    materialien              = Column(JSON, nullable=True)
+    taetigkeit               = Column(Text, nullable=True)
+    notizen                  = Column(Text, nullable=True)
+    unterschrift_mitarbeiter = Column(Text, nullable=True)
+    unterschrift_kunde       = Column(Text, nullable=True)
+    unterschrift_datum       = Column(DateTime(timezone=True), nullable=True)
+    kunde_anwesend           = Column(Boolean, default=False)
+    pdf_erstellt_am          = Column(DateTime(timezone=True), nullable=True)
+    erstellt_am              = Column(DateTime(timezone=True), server_default=func.now())
+
+    auftrag      = relationship("Auftrag", back_populates="regiezettel_auftraege")
+    erstellt_von = relationship("User", foreign_keys=[erstellt_von_id])

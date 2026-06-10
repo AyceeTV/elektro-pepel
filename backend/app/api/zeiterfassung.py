@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, extract
+from sqlalchemy import extract
 from datetime import date, datetime, timezone, timedelta
 from typing import Optional, List
 from pydantic import BaseModel
@@ -11,13 +11,16 @@ from app.models.models import User, Zeiteintrag, Baustelle, AuditLog, Rolle
 
 router = APIRouter()
 
+MAX_STUNDEN = 8.25
+PAUSE_AB_STUNDEN = 6.0
+PFLICHT_PAUSE_MIN = 30
 
 class ManuellerEintrag(BaseModel):
     datum: str
-    beginn_uhr: str        # "07:00"
-    ende_uhr: str          # "16:00"
-    pausen: Optional[list] = []   # [{"von":"09:00","bis":"09:30"}, ...]
-    positionen: Optional[list] = []  # [{"baustelle_id":1,"stunden":4.0,"taetigkeit":"..."}]
+    beginn_uhr: str
+    ende_uhr: str
+    pausen: Optional[list] = []
+    positionen: Optional[list] = []
     ueberstunden_extra: Optional[float] = 0.0
     freizeit_genommen: Optional[float] = 0.0
     notizen: Optional[str] = None
@@ -27,7 +30,6 @@ class KorrekturRequest(BaseModel):
     ende: Optional[datetime] = None
     pause_minuten: Optional[int] = None
     taetigkeit: Optional[str] = None
-    materialien: Optional[list] = None
     grund: str
 
 class ZeiteintragOut(BaseModel):
@@ -39,42 +41,40 @@ class ZeiteintragOut(BaseModel):
     arbeitsstunden: Optional[float]
     ueberstunden: Optional[float]
     taetigkeit: Optional[str]
-    materialien: Optional[list]
     notizen: Optional[str]
     korrigiert: bool
+    genehmigt: Optional[bool]
+    genehmigt_von_name: Optional[str] = None
     baustelle_id: Optional[int]
     baustelle_name: Optional[str] = None
     mitarbeiter_name: Optional[str] = None
     pausen_data: Optional[list] = None
     positionen_data: Optional[list] = None
     freizeit_genommen: Optional[float] = None
-
     class Config:
         from_attributes = True
 
 
 def parse_uhr(datum_str: str, uhr_str: str) -> datetime:
-    """Kombiniert Datum + Uhrzeit zu datetime"""
     d = date.fromisoformat(datum_str)
     h, m = map(int, uhr_str.split(":"))
     return datetime(d.year, d.month, d.day, h, m, tzinfo=timezone.utc)
 
 
-def berechne_nettozeit(beginn: datetime, ende: datetime, pausen: list) -> tuple:
-    """Gibt (brutto_min, pause_min, netto_min) zurück"""
-    brutto = (ende - beginn).total_seconds() / 60
+def berechne_nettozeit(beginn: datetime, ende: datetime, pausen: list):
+    brutto_min = (ende - beginn).total_seconds() / 60
     pause_min = 0
     for p in pausen:
         try:
-            p_von = datetime.strptime(p["von"], "%H:%M").replace(
+            pv = datetime.strptime(p["von"], "%H:%M").replace(
                 year=beginn.year, month=beginn.month, day=beginn.day, tzinfo=timezone.utc)
-            p_bis = datetime.strptime(p["bis"], "%H:%M").replace(
+            pb = datetime.strptime(p["bis"], "%H:%M").replace(
                 year=beginn.year, month=beginn.month, day=beginn.day, tzinfo=timezone.utc)
-            pause_min += max(0, (p_bis - p_von).total_seconds() / 60)
+            pause_min += max(0, (pb - pv).total_seconds() / 60)
         except:
             pass
-    netto = max(0, brutto - pause_min)
-    return brutto, pause_min, netto
+    netto_min = max(0, brutto_min - pause_min)
+    return brutto_min, pause_min, netto_min
 
 
 @router.post("/manuell")
@@ -83,7 +83,6 @@ def manueller_eintrag(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Tageseintrag mit Uhrzeiten, Pausen, mehreren Baustellen"""
     try:
         beginn = parse_uhr(req.datum, req.beginn_uhr)
         ende   = parse_uhr(req.datum, req.ende_uhr)
@@ -94,18 +93,38 @@ def manueller_eintrag(
         raise HTTPException(status_code=400, detail="Ende muss nach Beginn liegen")
 
     brutto_min, pause_min, netto_min = berechne_nettozeit(beginn, ende, req.pausen or [])
-    netto_std = round(netto_min / 60, 2)
+    netto_std = netto_min / 60
 
-    # Sollstunden (8h Standardarbeitstag)
-    soll_std = 8.0
-    ueberstunden = round(netto_std - soll_std + (req.ueberstunden_extra or 0) - (req.freizeit_genommen or 0), 2)
+    # ── Regel 1: Pflichtpause ab 6h Arbeitszeit ──────────────────────────────
+    if netto_std >= PAUSE_AB_STUNDEN and pause_min < PFLICHT_PAUSE_MIN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ab {PAUSE_AB_STUNDEN}h Arbeitszeit ist eine Pause von mindestens {PFLICHT_PAUSE_MIN} Minuten Pflicht."
+        )
 
-    # Bestimme Hauptbaustelle und Tätigkeit
+    # ── Regel 2: Maximum 8,25h Nettostunden (ohne Überstunden) ───────────────
+    normale_stunden = min(netto_std, MAX_STUNDEN)
+    if netto_std > MAX_STUNDEN and (req.ueberstunden_extra or 0) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximale Arbeitszeit: {MAX_STUNDEN}h. Mehrarbeit bitte als Überstunden eintragen."
+        )
+
+    ueberstunden = round(
+        (netto_std - MAX_STUNDEN) +
+        (req.ueberstunden_extra or 0) -
+        (req.freizeit_genommen or 0),
+        2
+    )
+
     haupt_baustelle = None
     haupt_taetigkeit = None
     if req.positionen:
         haupt_baustelle = req.positionen[0].get("baustelle_id")
         haupt_taetigkeit = req.positionen[0].get("taetigkeit")
+
+    # Genehmigung nötig wenn Baustelle angegeben
+    braucht_genehmigung = haupt_baustelle is not None
 
     eintrag = Zeiteintrag(
         user_id=current_user.id,
@@ -114,15 +133,19 @@ def manueller_eintrag(
         beginn=beginn,
         ende=ende,
         pause_minuten=int(pause_min),
-        arbeitsstunden=netto_std,
+        arbeitsstunden=round(normale_stunden, 2),
         ueberstunden=ueberstunden,
         taetigkeit=haupt_taetigkeit,
         notizen=req.notizen,
+        # Genehmigung: None=ausstehend, True=genehmigt, False=abgelehnt
+        # Wir speichern im korrektur_grund Feld ob genehmigt (temporär bis Migration)
+        korrektur_grund="ausstehend" if braucht_genehmigung else "keine_baustelle",
         materialien={
             "pausen": req.pausen or [],
             "positionen": req.positionen or [],
             "ueberstunden_extra": req.ueberstunden_extra or 0,
             "freizeit_genommen": req.freizeit_genommen or 0,
+            "genehmigt": None if braucht_genehmigung else True,
         },
     )
     db.add(eintrag)
@@ -130,22 +153,114 @@ def manueller_eintrag(
     db.refresh(eintrag)
 
     return {
-        "message": "Eintrag gespeichert",
+        "message": "Eintrag gespeichert" + (" — wartet auf Genehmigung durch Bauleiter" if braucht_genehmigung else ""),
         "id": eintrag.id,
-        "netto_stunden": netto_std,
+        "netto_stunden": round(normale_stunden, 2),
         "pause_minuten": int(pause_min),
         "ueberstunden": ueberstunden,
+        "wartet_auf_genehmigung": braucht_genehmigung,
     }
+
+
+@router.get("/genehmigung/offen")
+def offene_genehmigungen(
+    current_user: User = Depends(require_role(Rolle.admin, Rolle.vorgesetzter, Rolle.bauleiter)),
+    db: Session = Depends(get_db)
+):
+    """Alle Zeiteinträge die auf Genehmigung warten — gefiltert nach Baustellen des Bauleiters"""
+    query = db.query(Zeiteintrag).filter(
+        Zeiteintrag.korrektur_grund == "ausstehend",
+        Zeiteintrag.ende != None,
+    )
+
+    # Bauleiter sieht nur seine Baustellen
+    if current_user.rolle == Rolle.bauleiter:
+        meine_baustellen = db.query(Baustelle).filter(
+            Baustelle.bauleiter_id == current_user.id
+        ).all()
+        ids = [b.id for b in meine_baustellen]
+        query = query.filter(Zeiteintrag.baustelle_id.in_(ids))
+
+    eintraege = query.order_by(Zeiteintrag.datum.desc()).all()
+    result = []
+    for e in eintraege:
+        mat = e.materialien or {}
+        result.append({
+            "id": e.id,
+            "datum": e.datum,
+            "mitarbeiter": e.user.vollname if e.user else "—",
+            "baustelle": e.baustelle.name if e.baustelle else "—",
+            "beginn": e.beginn,
+            "ende": e.ende,
+            "pause_minuten": e.pause_minuten,
+            "arbeitsstunden": e.arbeitsstunden,
+            "taetigkeit": e.taetigkeit,
+            "positionen": mat.get("positionen", []),
+            "pausen": mat.get("pausen", []),
+        })
+    return result
+
+
+@router.put("/{eintrag_id}/genehmigen")
+def genehmigen(
+    eintrag_id: int,
+    current_user: User = Depends(require_role(Rolle.admin, Rolle.vorgesetzter, Rolle.bauleiter)),
+    db: Session = Depends(get_db)
+):
+    eintrag = db.query(Zeiteintrag).filter(Zeiteintrag.id == eintrag_id).first()
+    if not eintrag:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+
+    # Bauleiter darf nur seine Baustellen genehmigen
+    if current_user.rolle == Rolle.bauleiter and eintrag.baustelle_id:
+        bs = db.query(Baustelle).filter(Baustelle.id == eintrag.baustelle_id).first()
+        if bs and bs.bauleiter_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Nur der zuständige Bauleiter kann genehmigen")
+
+    eintrag.korrektur_grund = "genehmigt"
+    eintrag.korrigiert_von_id = current_user.id
+    eintrag.korrigiert_am = datetime.now(timezone.utc)
+    mat = dict(eintrag.materialien or {})
+    mat["genehmigt"] = True
+    mat["genehmigt_von"] = current_user.vollname
+    eintrag.materialien = mat
+
+    log = AuditLog(user_id=current_user.id, aktion="zeiteintrag_genehmigt",
+                   tabelle="zeiteintraege", datensatz_id=eintrag_id)
+    db.add(log)
+    db.commit()
+    return {"message": "Genehmigt"}
+
+
+@router.put("/{eintrag_id}/ablehnen")
+def ablehnen(
+    eintrag_id: int,
+    grund: str = "",
+    current_user: User = Depends(require_role(Rolle.admin, Rolle.vorgesetzter, Rolle.bauleiter)),
+    db: Session = Depends(get_db)
+):
+    eintrag = db.query(Zeiteintrag).filter(Zeiteintrag.id == eintrag_id).first()
+    if not eintrag:
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
+
+    eintrag.korrektur_grund = f"abgelehnt: {grund}"
+    eintrag.korrigiert_von_id = current_user.id
+    eintrag.korrigiert_am = datetime.now(timezone.utc)
+    mat = dict(eintrag.materialien or {})
+    mat["genehmigt"] = False
+    mat["ablehnungsgrund"] = grund
+    eintrag.materialien = mat
+
+    log = AuditLog(user_id=current_user.id, aktion="zeiteintrag_abgelehnt",
+                   tabelle="zeiteintraege", datensatz_id=eintrag_id,
+                   details={"grund": grund})
+    db.add(log)
+    db.commit()
+    return {"message": "Abgelehnt"}
 
 
 @router.get("/status")
 def aktueller_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    offen = db.query(Zeiteintrag).filter(
-        Zeiteintrag.user_id == current_user.id,
-        Zeiteintrag.ende == None
-    ).first()
-    if offen:
-        return {"eingestempelt": True, "beginn": offen.beginn, "eintrag_id": offen.id, "baustelle_id": offen.baustelle_id}
     return {"eingestempelt": False}
 
 
@@ -169,110 +284,81 @@ def meine_eintraege(
     result = []
     for e in eintraege:
         mat = e.materialien or {}
-        out = ZeiteintragOut(
+        genehmigt_val = mat.get("genehmigt") if isinstance(mat, dict) else None
+        if e.korrektur_grund == "keine_baustelle":
+            genehmigt_val = True
+        result.append(ZeiteintragOut(
             id=e.id, datum=e.datum, beginn=e.beginn, ende=e.ende,
-            pause_minuten=e.pause_minuten or 0, arbeitsstunden=e.arbeitsstunden,
-            ueberstunden=e.ueberstunden,
-            taetigkeit=e.taetigkeit, materialien=None, notizen=e.notizen,
-            korrigiert=e.korrigiert, baustelle_id=e.baustelle_id,
+            pause_minuten=e.pause_minuten or 0,
+            arbeitsstunden=e.arbeitsstunden if genehmigt_val else None,
+            ueberstunden=e.ueberstunden if genehmigt_val else None,
+            taetigkeit=e.taetigkeit, notizen=e.notizen,
+            korrigiert=e.korrigiert,
+            genehmigt=genehmigt_val,
+            genehmigt_von_name=mat.get("genehmigt_von") if isinstance(mat, dict) else None,
+            baustelle_id=e.baustelle_id,
             baustelle_name=e.baustelle.name if e.baustelle else None,
             pausen_data=mat.get("pausen", []) if isinstance(mat, dict) else [],
             positionen_data=mat.get("positionen", []) if isinstance(mat, dict) else [],
             freizeit_genommen=mat.get("freizeit_genommen", 0) if isinstance(mat, dict) else 0,
-        )
-        result.append(out)
+        ))
     return result
 
 
 @router.get("/ueberstunden")
-def ueberstunden_konto(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Überstundenkonto des Mitarbeiters"""
+def ueberstunden_konto(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     eintraege = db.query(Zeiteintrag).filter(
         Zeiteintrag.user_id == current_user.id,
         Zeiteintrag.ende != None,
+        Zeiteintrag.korrektur_grund.in_(["genehmigt", "keine_baustelle"]),
     ).all()
     gesamt = sum(e.ueberstunden or 0 for e in eintraege)
-    return {
-        "gesamt_ueberstunden": round(gesamt, 2),
-        "positiv": gesamt > 0,
-    }
+    return {"gesamt_ueberstunden": round(gesamt, 2)}
 
 
-@router.get("/team", response_model=List[ZeiteintragOut])
+@router.get("/team")
 def team_eintraege(
     monat: Optional[int] = None,
     jahr: Optional[int] = None,
-    baustelle_id: Optional[int] = None,
-    user_id: Optional[int] = None,
     current_user: User = Depends(require_role(Rolle.admin, Rolle.vorgesetzter, Rolle.bauleiter)),
     db: Session = Depends(get_db)
 ):
     jetzt = datetime.now()
     m = monat or jetzt.month
     j = jahr or jetzt.year
-
-    query = db.query(Zeiteintrag).filter(
+    eintraege = db.query(Zeiteintrag).filter(
         extract("month", Zeiteintrag.datum) == m,
         extract("year", Zeiteintrag.datum) == j,
-    )
-    if baustelle_id:
-        query = query.filter(Zeiteintrag.baustelle_id == baustelle_id)
-    if user_id:
-        query = query.filter(Zeiteintrag.user_id == user_id)
-
-    eintraege = query.order_by(Zeiteintrag.datum.desc()).all()
-    result = []
-    for e in eintraege:
-        out = ZeiteintragOut(
-            id=e.id, datum=e.datum, beginn=e.beginn, ende=e.ende,
-            pause_minuten=e.pause_minuten or 0, arbeitsstunden=e.arbeitsstunden,
-            ueberstunden=e.ueberstunden,
-            taetigkeit=e.taetigkeit, materialien=None, notizen=e.notizen,
-            korrigiert=e.korrigiert, baustelle_id=e.baustelle_id,
-            baustelle_name=e.baustelle.name if e.baustelle else None,
-            mitarbeiter_name=e.user.vollname if e.user else None,
-        )
-        result.append(out)
-    return result
+    ).order_by(Zeiteintrag.datum.desc()).all()
+    return [{"id":e.id,"datum":e.datum,"mitarbeiter":e.user.vollname if e.user else "—",
+             "baustelle":e.baustelle.name if e.baustelle else "—",
+             "arbeitsstunden":e.arbeitsstunden,"ueberstunden":e.ueberstunden,
+             "genehmigt":(e.materialien or {}).get("genehmigt")} for e in eintraege]
 
 
 @router.put("/{eintrag_id}/korrektur")
 def korrektur(
-    eintrag_id: int,
-    req: KorrekturRequest,
+    eintrag_id: int, req: KorrekturRequest,
     current_user: User = Depends(require_role(Rolle.admin, Rolle.vorgesetzter, Rolle.bauleiter)),
     db: Session = Depends(get_db)
 ):
     eintrag = db.query(Zeiteintrag).filter(Zeiteintrag.id == eintrag_id).first()
     if not eintrag:
-        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
-
-    alt = {"beginn": str(eintrag.beginn), "ende": str(eintrag.ende)}
+        raise HTTPException(status_code=404, detail="Nicht gefunden")
     if req.beginn: eintrag.beginn = req.beginn
     if req.ende: eintrag.ende = req.ende
     if req.pause_minuten is not None: eintrag.pause_minuten = req.pause_minuten
     if req.taetigkeit: eintrag.taetigkeit = req.taetigkeit
-
     if eintrag.beginn and eintrag.ende:
-        netto = (eintrag.ende - eintrag.beginn).total_seconds() / 3600 - (eintrag.pause_minuten or 0) / 60
+        netto = (eintrag.ende - eintrag.beginn).total_seconds()/3600 - (eintrag.pause_minuten or 0)/60
         eintrag.arbeitsstunden = round(max(0, netto), 2)
-
     eintrag.korrigiert = True
     eintrag.korrigiert_von_id = current_user.id
     eintrag.korrigiert_am = datetime.now(timezone.utc)
-    eintrag.korrektur_grund = req.grund
-
-    log = AuditLog(
-        user_id=current_user.id, aktion="zeiteintrag_korrigiert",
-        tabelle="zeiteintraege", datensatz_id=eintrag_id,
-        details={"alt": alt, "grund": req.grund}
-    )
-    db.add(log)
+    db.add(AuditLog(user_id=current_user.id, aktion="zeiteintrag_korrigiert",
+                    tabelle="zeiteintraege", datensatz_id=eintrag_id, details={"grund": req.grund}))
     db.commit()
-    return {"message": "Korrektur gespeichert", "arbeitsstunden": eintrag.arbeitsstunden}
+    return {"message": "Korrektur gespeichert"}
 
 
 @router.delete("/{eintrag_id}")

@@ -30,6 +30,24 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
+@router.post("/setup", response_model=UserOut)
+def ersten_admin_anlegen(req: UserCreate, db: Session = Depends(get_db)):
+    """Nur nutzbar wenn noch kein einziger User existiert."""
+    anzahl = db.query(User).count()
+    if anzahl > 0:
+        raise HTTPException(status_code=403, detail="Setup bereits abgeschlossen.")
+    user = User(
+        email=req.email.lower(),
+        passwort_hash=hash_password(req.passwort),
+        vorname=req.vorname, nachname=req.nachname,
+        telefon=req.telefon, rolle=Rolle.admin,
+        urlaubstage_jahr=req.urlaubstage_jahr,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
 @router.get("/", response_model=List[UserOut])
 def alle_user(
     current_user: User = Depends(require_role(Rolle.admin, Rolle.vorgesetzter, Rolle.bauleiter)),
@@ -65,14 +83,11 @@ def loeschen(
     current_user: User = Depends(require_role(Rolle.admin)),
     db: Session = Depends(get_db)
 ):
-    """DSGVO-konformes Soft-Delete: Daten werden anonymisiert, nicht gelöscht"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Eigenen Account nicht löschbar")
-
-    # Anonymisierung statt Hard-Delete (Aufbewahrungspflicht Zeitdaten)
     user.geloescht = True
     user.geloescht_am = datetime.now(timezone.utc)
     user.aktiv = False
@@ -80,7 +95,6 @@ def loeschen(
     user.nachname = f"#{user.id}"
     user.email = f"geloescht_{user.id}@deleted.local"
     user.telefon = None
-
     log = AuditLog(user_id=current_user.id, aktion="user_geloescht_dsgvo", details={"user_id": user_id})
     db.add(log)
     db.commit()

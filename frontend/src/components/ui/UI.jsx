@@ -1,177 +1,229 @@
-// ─── Wiederverwendbare UI-Bausteine ───────────────────────────────────────────
+// ─── Design System – Elektro Pepel ───────────────────────────────────────────
+const C = {
+  blue:    "#1a3d6e",
+  amber:   "#f59e0b",
+  bg:      "#f4f6f9",
+  surface: "#ffffff",
+  border:  "#e8edf2",
+  text:    "#0f1923",
+  muted:   "#64748b",
+  success: "#16a34a",
+  danger:  "#dc2626",
+};
 
-export function Karte({ children, style = {} }) {
+export function Seite({ titel, untertitel, aktion, children }) {
   return (
-    <div style={{
-      background: "white", borderRadius: 20, padding: 20,
-      boxShadow: "0 2px 12px rgba(0,0,0,0.07)", ...style
-    }}>
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: C.text, margin: 0 }}>{titel}</h1>
+          {untertitel && <p style={{ fontSize: 14, color: C.muted, margin: "4px 0 0" }}>{untertitel}</p>}
+        </div>
+        {aktion && <div>{aktion}</div>}
+      </div>
       {children}
     </div>
   );
 }
 
-export function GrosserButton({ onClick, children, farbe = "#1a3d6e", disabled = false, icon = null, style = {} }) {
+export function Karte({ children, style = {}, onClick }) {
   return (
-    <button onClick={onClick} disabled={disabled} style={{
-      width: "100%", padding: "18px 20px", background: disabled ? "#cbd5e1" : farbe,
-      color: "white", fontSize: 18, fontWeight: 700, borderRadius: 16,
-      border: "none", cursor: disabled ? "not-allowed" : "pointer",
-      display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-      boxShadow: disabled ? "none" : `0 4px 14px ${farbe}55`,
-      transition: "transform 0.1s, box-shadow 0.1s",
+    <div onClick={onClick} style={{
+      background: C.surface, borderRadius: 12, border: `1px solid ${C.border}`,
+      padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+      cursor: onClick ? "pointer" : "default",
+      transition: onClick ? "box-shadow 0.15s, border-color 0.15s" : "none",
       ...style
     }}
-      onTouchStart={e => !disabled && (e.currentTarget.style.transform = "scale(0.97)")}
-      onTouchEnd={e => !disabled && (e.currentTarget.style.transform = "scale(1)")}
+      onMouseEnter={e => { if (onClick) { e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.1)"; e.currentTarget.style.borderColor = "#c8d4e0"; } }}
+      onMouseLeave={e => { if (onClick) { e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.05)"; e.currentTarget.style.borderColor = C.border; } }}
     >
-      {icon && <span style={{ fontSize: 22 }}>{icon}</span>}
       {children}
-    </button>
+    </div>
   );
 }
 
-export function KleinerButton({ onClick, children, farbe = "#1a3d6e", outlined = false, style = {} }) {
+export function StatKarte({ zahl, label, icon, farbe = C.blue, trend }) {
   return (
-    <button onClick={onClick} style={{
-      padding: "10px 18px", background: outlined ? "white" : farbe,
-      color: outlined ? farbe : "white",
-      border: outlined ? `2px solid ${farbe}` : "none",
-      borderRadius: 10, fontWeight: 600, fontSize: 14, cursor: "pointer", ...style
+    <div style={{
+      background: C.surface, borderRadius: 12, border: `1px solid ${C.border}`,
+      padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)"
     }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <p style={{ fontSize: 13, color: C.muted, margin: "0 0 8px", fontWeight: 500 }}>{label}</p>
+          <p style={{ fontSize: 28, fontWeight: 700, color: C.text, margin: 0 }}>{zahl}</p>
+          {trend && <p style={{ fontSize: 12, color: C.success, margin: "4px 0 0" }}>{trend}</p>}
+        </div>
+        <div style={{
+          width: 44, height: 44, borderRadius: 10,
+          background: farbe + "15", display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 20
+        }}>{icon}</div>
+      </div>
+    </div>
+  );
+}
+
+export function Btn({ onClick, children, variant = "primary", size = "md", disabled = false, style = {} }) {
+  const base = {
+    border: "none", borderRadius: 8, cursor: disabled ? "not-allowed" : "pointer",
+    fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6,
+    transition: "all 0.15s", opacity: disabled ? 0.5 : 1,
+    fontSize: size === "sm" ? 13 : size === "lg" ? 16 : 14,
+    padding: size === "sm" ? "6px 12px" : size === "lg" ? "14px 24px" : "9px 16px",
+  };
+  const variants = {
+    primary:   { background: C.blue,   color: "white" },
+    amber:     { background: C.amber,  color: "#0f1923" },
+    danger:    { background: C.danger, color: "white" },
+    ghost:     { background: "transparent", color: C.muted, border: `1px solid ${C.border}` },
+    secondary: { background: "#f1f5f9", color: C.text },
+  };
+  return (
+    <button onClick={disabled ? undefined : onClick} style={{ ...base, ...variants[variant], ...style }}>
       {children}
     </button>
   );
 }
 
-export function Eingabe({ label, value, onChange, type = "text", placeholder = "", required = false, style = {} }) {
+export function Input({ label, value, onChange, type = "text", placeholder = "", required, style = {} }) {
   return (
-    <label style={{ display: "block", marginBottom: 14 }}>
-      {label && (
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>
-          {label}{required && <span style={{ color: "#dc2626" }}> *</span>}
-        </span>
-      )}
-      <input
-        type={type} value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
+    <label style={{ display: "block", marginBottom: 16 }}>
+      {label && <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>
+        {label}{required && <span style={{ color: C.danger }}> *</span>}
+      </span>}
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         style={{
-          width: "100%", padding: "14px 16px", fontSize: 16, borderRadius: 12,
-          border: "2px solid #e2e8f0", boxSizing: "border-box", outline: "none",
-          background: "white", ...style
+          width: "100%", padding: "9px 12px", fontSize: 14, borderRadius: 8,
+          border: `1px solid ${C.border}`, boxSizing: "border-box", background: "white",
+          color: C.text, outline: "none", transition: "border-color 0.15s", ...style
         }}
-        onFocus={e => e.target.style.border = "2px solid #2563eb"}
-        onBlur={e => e.target.style.border = "2px solid #e2e8f0"}
+        onFocus={e => e.target.style.borderColor = C.blue}
+        onBlur={e => e.target.style.borderColor = C.border}
       />
     </label>
   );
 }
 
-export function Textarea({ label, value, onChange, placeholder = "", rows = 3 }) {
+export function Select({ label, value, onChange, optionen = [] }) {
   return (
-    <label style={{ display: "block", marginBottom: 14 }}>
-      {label && (
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>
-          {label}
-        </span>
-      )}
-      <textarea
-        value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder} rows={rows}
-        style={{
-          width: "100%", padding: "14px 16px", fontSize: 15, borderRadius: 12,
-          border: "2px solid #e2e8f0", boxSizing: "border-box", outline: "none",
-          resize: "vertical", fontFamily: "inherit", background: "white",
-        }}
-        onFocus={e => e.target.style.border = "2px solid #2563eb"}
-        onBlur={e => e.target.style.border = "2px solid #e2e8f0"}
-      />
-    </label>
-  );
-}
-
-export function Auswahl({ label, value, onChange, optionen = [], style = {} }) {
-  return (
-    <label style={{ display: "block", marginBottom: 14 }}>
-      {label && (
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>
-          {label}
-        </span>
-      )}
-      <select
-        value={value} onChange={e => onChange(e.target.value)}
-        style={{
-          width: "100%", padding: "14px 16px", fontSize: 16, borderRadius: 12,
-          border: "2px solid #e2e8f0", boxSizing: "border-box", background: "white",
-          outline: "none", ...style
-        }}
-        onFocus={e => e.target.style.border = "2px solid #2563eb"}
-        onBlur={e => e.target.style.border = "2px solid #e2e8f0"}
+    <label style={{ display: "block", marginBottom: 16 }}>
+      {label && <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>{label}</span>}
+      <select value={value} onChange={e => onChange(e.target.value)} style={{
+        width: "100%", padding: "9px 12px", fontSize: 14, borderRadius: 8,
+        border: `1px solid ${C.border}`, background: "white", color: C.text,
+        outline: "none", cursor: "pointer",
+      }}
+        onFocus={e => e.target.style.borderColor = C.blue}
+        onBlur={e => e.target.style.borderColor = C.border}
       >
-        {optionen.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
+        {optionen.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </label>
   );
 }
 
-export function Seitenheader({ titel, untertitel }) {
+export function Textarea({ label, value, onChange, placeholder, rows = 3 }) {
   return (
-    <div style={{ padding: "20px 16px 8px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 800, color: "#1a3d6e", margin: 0 }}>{titel}</h1>
-      {untertitel && <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>{untertitel}</p>}
+    <label style={{ display: "block", marginBottom: 16 }}>
+      {label && <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>{label}</span>}
+      <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+        style={{
+          width: "100%", padding: "9px 12px", fontSize: 14, borderRadius: 8,
+          border: `1px solid ${C.border}`, boxSizing: "border-box", resize: "vertical",
+          fontFamily: "inherit", background: "white", color: C.text, outline: "none",
+        }}
+        onFocus={e => e.target.style.borderColor = C.blue}
+        onBlur={e => e.target.style.borderColor = C.border}
+      />
+    </label>
+  );
+}
+
+export function Badge({ label, typ = "default" }) {
+  const farben = {
+    success:  { bg: "#dcfce7", color: "#15803d" },
+    warning:  { bg: "#fef9c3", color: "#854d0e" },
+    danger:   { bg: "#fee2e2", color: "#991b1b" },
+    info:     { bg: "#dbeafe", color: "#1e40af" },
+    default:  { bg: "#f1f5f9", color: "#475569" },
+    amber:    { bg: "#fef3c7", color: "#92400e" },
+  };
+  const f = farben[typ] || farben.default;
+  return (
+    <span style={{
+      background: f.bg, color: f.color, borderRadius: 6,
+      padding: "3px 10px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap"
+    }}>{label}</span>
+  );
+}
+
+export function Tabelle({ spalten, zeilen, leer = "Keine Einträge" }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+        <thead>
+          <tr style={{ borderBottom: `2px solid ${C.border}` }}>
+            {spalten.map(s => (
+              <th key={s.key} style={{
+                textAlign: "left", padding: "10px 16px", fontSize: 12,
+                fontWeight: 600, color: C.muted, textTransform: "uppercase",
+                letterSpacing: "0.05em", whiteSpace: "nowrap"
+              }}>{s.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {zeilen.length === 0 ? (
+            <tr><td colSpan={spalten.length} style={{ textAlign: "center", padding: "40px 16px", color: C.muted, fontSize: 14 }}>{leer}</td></tr>
+          ) : zeilen.map((z, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${C.border}`, transition: "background 0.1s" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >
+              {spalten.map(s => (
+                <td key={s.key} style={{ padding: "12px 16px", color: C.text }}>{z[s.key]}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-export function StatusBadge({ status }) {
-  const farben = {
-    genehmigt: { bg: "#dcfce7", color: "#16a34a" },
-    beantragt: { bg: "#fef9c3", color: "#ca8a04" },
-    abgelehnt: { bg: "#fee2e2", color: "#dc2626" },
-    aktiv:     { bg: "#dbeafe", color: "#1d4ed8" },
-    abgeschlossen: { bg: "#f1f5f9", color: "#64748b" },
-  };
-  const f = farben[status] || { bg: "#f1f5f9", color: "#64748b" };
+export function Modal({ offen, onClose, titel, breite = 480, children }) {
+  if (!offen) return null;
   return (
-    <span style={{
-      background: f.bg, color: f.color, borderRadius: 8,
-      padding: "3px 10px", fontSize: 12, fontWeight: 600
-    }}>
-      {status}
-    </span>
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 500,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16
+    }} onClick={onClose}>
+      <div style={{
+        background: "white", borderRadius: 16, width: "100%", maxWidth: breite,
+        maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)"
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.text }}>{titel}</h2>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 16, color: C.muted }}>✕</button>
+        </div>
+        <div style={{ padding: "20px 24px" }}>{children}</div>
+      </div>
+    </div>
   );
 }
 
 export function Lader() {
-  return (
-    <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 16 }}>
-      ⏳ Wird geladen...
-    </div>
-  );
+  return <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}>Wird geladen…</div>;
 }
 
-export function Modal({ offen, onClose, titel, children }) {
-  if (!offen) return null;
+export function Leer({ icon, text, aktion }) {
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-      zIndex: 500, display: "flex", alignItems: "flex-end",
-    }} onClick={onClose}>
-      <div style={{
-        background: "white", borderRadius: "24px 24px 0 0", width: "100%",
-        maxHeight: "90vh", overflow: "auto", padding: 24,
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#1a3d6e" }}>{titel}</h2>
-          <button onClick={onClose} style={{
-            background: "#f1f5f9", border: "none", borderRadius: 50,
-            width: 36, height: 36, fontSize: 18, cursor: "pointer"
-          }}>✕</button>
-        </div>
-        {children}
-      </div>
+    <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <div style={{ fontSize: 48, marginBottom: 12 }}>{icon}</div>
+      <p style={{ color: "#94a3b8", fontSize: 15, margin: "0 0 16px" }}>{text}</p>
+      {aktion}
     </div>
   );
 }

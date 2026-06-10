@@ -1,3 +1,4 @@
+in · PY
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -38,3 +39,4 @@ app.include_router(admin.router,         prefix="/api/admin",         tags=["Adm
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+ 

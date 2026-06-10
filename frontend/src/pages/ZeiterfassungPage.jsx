@@ -93,23 +93,24 @@ export default function ZeiterfassungPage() {
 
   async function ladeAlles() {
     setLaden(true);
-    const calls = [
+    const [eRes, bRes, uRes, aRes] = await Promise.all([
       apiFetch(`/api/zeiterfassung/meine?monat=${monat+1}&jahr=${jahr}`),
       apiFetch("/api/baustellen/"),
       apiFetch("/api/zeiterfassung/ueberstunden"),
       apiFetch("/api/urlaub/meine"),
-    ];
-    if (istVorgesetzter) {
-      calls.push(apiFetch("/api/zeiterfassung/genehmigung/offen"));
-      calls.push(apiFetch("/api/urlaub/team?status=beantragt"));
-    }
-    const [eRes, bRes, uRes, aRes, gRes, gaRes] = await Promise.all(calls);
+    ]);
     if (eRes?.ok) setEintraege(await eRes.json());
     if (bRes?.ok) setBaustellen(await bRes.json());
     if (uRes?.ok) { const d=await uRes.json(); setUeberstunden(d.gesamt_ueberstunden); }
     if (aRes?.ok) setAbwesenheiten(await aRes.json());
-    if (gRes?.ok) setOffeneGenehmigungen(await gRes.json());
-    if (gaRes?.ok) setOffeneAbwesenheiten(await gaRes.json());
+    if (istVorgesetzter) {
+      const [gRes, gaRes] = await Promise.all([
+        apiFetch("/api/zeiterfassung/genehmigung/offen"),
+        apiFetch("/api/urlaub/team?status=beantragt"),
+      ]);
+      if (gRes?.ok) setOffeneGenehmigungen(await gRes.json());
+      if (gaRes?.ok) setOffeneAbwesenheiten(await gaRes.json());
+    }
     setLaden(false);
   }
 
@@ -143,8 +144,9 @@ export default function ZeiterfassungPage() {
       body: JSON.stringify({
         datum, beginn_uhr:beginn, ende_uhr:ende, pausen,
         positionen: positionen.filter(p=>p.stunden).map(p=>({
-          baustelle_id: p.baustelle_id?Number(p.baustelle_id):null,
-          stunden:Number(p.stunden), taetigkeit:p.taetigkeit||null,
+          baustelle_id: (p.baustelle_id && p.baustelle_id!=="fortbildung") ? Number(p.baustelle_id) : null,
+          stunden:Number(p.stunden),
+          taetigkeit: p.baustelle_id==="fortbildung" ? ("Fortbildung" + (p.taetigkeit?": "+p.taetigkeit:"")) : (p.taetigkeit||null),
         })),
         ueberstunden_extra:Number(uebExtra)||0,
         freizeit_genommen:Number(freizeit)||0,
@@ -252,7 +254,7 @@ export default function ZeiterfassungPage() {
       {offeneAbwesenheiten.length>0&&<>
         <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",margin:"16px 0 8px",letterSpacing:"0.06em"}}>ABWESENHEITEN ({offeneAbwesenheiten.length})</div>
         {offeneAbwesenheiten.map(a=>{
-          const typFarben={urlaub:{bg:"#bfdbfe",c:"#1e3a8a",icon:"🌴"},krank:{bg:"#fce7f3",c:"#9d174d",icon:"🤒"},fortbildung:{bg:"#ede9fe",c:"#4c1d95",icon:"📚"},sonderurlaub:{bg:"#fef9c3",c:"#92400e",icon:"📅"}};
+          const typFarben={urlaub:{bg:"#bfdbfe",c:"#1e3a8a",icon:"🌴"},krank:{bg:"#fce7f3",c:"#9d174d",icon:"🤒"},sonderurlaub:{bg:"#fef9c3",c:"#92400e",icon:"📅"}};
           const f=typFarben[a.typ]||typFarben.urlaub;
           return (
             <div key={a.id} style={{background:"white",border:"1.5px solid #e8edf2",borderRadius:12,padding:18,marginBottom:10}}>
@@ -321,6 +323,7 @@ export default function ZeiterfassungPage() {
                     <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:6}}>BAUSTELLE</div>
                     <select value={pos.baustelle_id} onChange={e=>{const n=[...positionen];n[i]={...n[i],baustelle_id:e.target.value};setPositionen(n);}} style={{width:"100%",padding:"11px 12px",fontSize:14,border:"1.5px solid #e8edf2",borderRadius:8,background:"white",outline:"none"}}>
                       <option value="">— wählen —</option>
+                      <option value="fortbildung">📚 Fortbildung</option>
                       {baustellen.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
@@ -381,7 +384,7 @@ export default function ZeiterfassungPage() {
             <div style={{marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:10}}>ART</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                {[["urlaub","🌴","Urlaub","#bfdbfe","#1e3a8a"],["krank","🤒","Krankmeldung","#fce7f3","#9d174d"],["fortbildung","📚","Fortbildung","#ede9fe","#4c1d95"],["sonderurlaub","📅","Sonderurlaub","#fef9c3","#92400e"]].map(([k,icon,label,bg,c])=>(
+                {[["urlaub","🌴","Urlaub","#bfdbfe","#1e3a8a"],["krank","🤒","Krankmeldung","#fce7f3","#9d174d"],["sonderurlaub","📅","Sonderurlaub","#fef9c3","#92400e"]].map(([k,icon,label,bg,c])=>(
                   <button key={k} onClick={()=>setAbwTyp(k)} style={{padding:"12px 8px",border:`2px solid ${abwTyp===k?c:"#e8edf2"}`,borderRadius:10,background:abwTyp===k?bg:"white",cursor:"pointer",textAlign:"center"}}>
                     <div style={{fontSize:20,marginBottom:4}}>{icon}</div>
                     <div style={{fontSize:12,fontWeight:700,color:abwTyp===k?c:"#475569"}}>{label}</div>

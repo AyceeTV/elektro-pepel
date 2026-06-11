@@ -17,10 +17,12 @@ export default function LoginPage({ onLogin }) {
     setFehler(""); setLaden(true);
     try {
       const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const formData = new FormData();
+      formData.append("username", email);
+      formData.append("password", passwort);
       const res = await fetch(API + "/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password: passwort }),
+        body: formData,
       });
       if (res.ok) {
         const data = await res.json();

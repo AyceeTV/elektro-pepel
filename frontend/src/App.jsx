@@ -59,7 +59,7 @@ export default function App() {
   const abmelden = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
-    setToken(""); setUser(null);
+    window.location.href = window.location.origin;
   };
 
   const ctx = { t, sprache, spracheWechseln, user, token, apiFetch, showToast, abmelden, seite, setSeite, API };
@@ -68,9 +68,7 @@ export default function App() {
     <LoginPage onLogin={(u, tk) => {
       localStorage.setItem("user", JSON.stringify(u));
       localStorage.setItem("token", tk);
-      setUser(u);
-      setToken(tk);
-      setSeite("home");
+      window.location.href = window.location.origin;
     }} />
   );
 

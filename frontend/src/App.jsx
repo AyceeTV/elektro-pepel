@@ -74,6 +74,8 @@ export default function App() {
     { key: "regiezettel",   icon: "📋", label: t("nav_regiezettel"), roles: ["admin","vorgesetzter","bauleiter"] },
     { key: "team",          icon: "👷", label: t("nav_team"),        roles: ["admin","vorgesetzter","bauleiter"] },
     { key: "auftraege",     icon: "📋", label: "Aufträge" },
+    { key: "buchhaltung",       icon: "📊", label: "Buchhaltung",        roles: ["admin","verwaltung"] },
+    { key: "verwaltung_katalog", icon: "🗄", label: "Katalog & Preise",   roles: ["admin","verwaltung"] },
     { key: "admin",         icon: "⚙️", label: t("nav_admin"),       roles: ["admin"] },
   ].filter(n => !n.roles || n.roles.includes(user.rolle));
 

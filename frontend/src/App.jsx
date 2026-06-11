@@ -19,7 +19,13 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function App() {
   const [sprache, setSprache] = useState(localStorage.getItem("sprache") || "de");
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem("user") || "null"));
+  const [user, setUser] = useState(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (!raw || raw === "undefined" || raw === "null") return null;
+      return JSON.parse(raw);
+    } catch { return null; }
+  });
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [seite, setSeite] = useState("home");
   const [toast, setToast] = useState(null);

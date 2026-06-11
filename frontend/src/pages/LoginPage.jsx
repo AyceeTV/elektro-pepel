@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useApp } from "../App";
-
-export default function LoginPage() {
-  const { anmelden, sprache, spracheWechseln } = useApp();
+export default function LoginPage({ onLogin }) {
+  const [sprache, setSprache] = (() => {
+    const [s, setS] = [localStorage.getItem("sprache")||"de", (lang) => { localStorage.setItem("sprache",lang); window.location.reload(); }];
+    return [s, setS];
+  })();
   const [email, setEmail] = useState("");
   const [passwort, setPasswort] = useState("");
   const [fehler, setFehler] = useState("");
@@ -14,8 +15,22 @@ export default function LoginPage() {
   async function submit(e) {
     e.preventDefault();
     setFehler(""); setLaden(true);
-    const ok = await anmelden(email, passwort);
-    if (!ok) setFehler(ro ? "E-mail sau parolă incorectă" : "E-Mail oder Passwort falsch");
+    try {
+      const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const res = await fetch(API + "/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: passwort }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem("token", data.access_token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        onLogin(data.user, data.access_token);
+      } else {
+        setFehler(ro ? "E-mail sau parolă incorectă" : "E-Mail oder Passwort falsch");
+      }
+    } catch { setFehler("Verbindungsfehler"); }
     setLaden(false);
   }
 
@@ -32,7 +47,7 @@ export default function LoginPage() {
 
       {/* Sprache oben rechts */}
       <div style={{display:"flex",justifyContent:"flex-end",padding:"16px 20px",position:"relative",zIndex:10}}>
-        <button onClick={()=>spracheWechseln(ro?"de":"ro")} style={{
+        <button onClick={()=>setSprache(ro?"de":"ro")} style={{
           background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",
           borderRadius:20,padding:"5px 14px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer"
         }}>{ro?"🇩🇪 DE":"🇷🇴 RO"}</button>
@@ -147,7 +162,7 @@ export default function LoginPage() {
 
       {/* Sprache */}
       <div style={{position:"absolute",top:24,right:24,zIndex:10}}>
-        <button onClick={()=>spracheWechseln(ro?"de":"ro")} style={{
+        <button onClick={()=>setSprache(ro?"de":"ro")} style={{
           background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",
           borderRadius:20,padding:"6px 16px",color:"white",fontSize:13,fontWeight:600,cursor:"pointer",
           backdropFilter:"blur(10px)",

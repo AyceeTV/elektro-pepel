@@ -1,3 +1,136 @@
+// ── Regiezettel Karte (inline Vorschau) ──────────────────────────────────────
+function RzKarte({ r, auftrag, pdfHerunterladen, pdfLaden }) {
+  const [offen, setOffen] = useState(false);
+  const mat = r.materialien || [];
+  const gesamtPreis = mat.reduce((s,m) => s + (parseFloat(m.menge||0)*parseFloat(m.preis||0)), 0);
+
+  return (
+    <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+      {/* Header — immer sichtbar */}
+      <div style={{padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",cursor:"pointer",background:offen?"#f8fafc":"white"}}
+        onClick={()=>setOffen(o=>!o)}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:14,fontWeight:800,color:"#0f1923"}}>
+              📋 {new Date(r.datum).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"long",year:"numeric"})}
+            </span>
+            <span style={{fontSize:13,fontWeight:700,color:"#f59e0b"}}>{r.arbeitsstunden?.toFixed(2)} h</span>
+            {r.unterschrift_mitarbeiter&&<span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:"#dcfce7",color:"#15803d"}}>✓ MA</span>}
+            {r.unterschrift_kunde&&<span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:"#dcfce7",color:"#15803d"}}>✓ Kunde</span>}
+            {r.pdf_erstellt_am&&<span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:"#dbeafe",color:"#1e40af"}}>📄 PDF</span>}
+          </div>
+          {r.taetigkeit&&<div style={{fontSize:12,color:"#64748b",marginTop:3}}>{r.taetigkeit.slice(0,80)}{r.taetigkeit.length>80?"...":""}</div>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <button onClick={e=>{e.stopPropagation();pdfHerunterladen(auftrag.id,r.id);}}
+            style={{padding:"6px 12px",background:"#0f1923",color:"white",border:"none",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+            {pdfLaden?"⏳":"📄 PDF"}
+          </button>
+          <span style={{fontSize:18,color:"#94a3b8",transition:"transform 0.2s",transform:offen?"rotate(180deg)":"rotate(0deg)"}}>⌄</span>
+        </div>
+      </div>
+
+      {/* Ausgeklappter Inhalt */}
+      {offen&&(
+        <div style={{borderTop:"1px solid #e2e8f0"}}>
+
+          {/* Arbeitszeit */}
+          <div style={{padding:"14px 18px",borderBottom:"1px solid #f1f5f9"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:10,letterSpacing:"0.06em"}}>ARBEITSZEIT</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10}}>
+              {[
+                ["Beginn",r.beginn_uhr||"—"],
+                ["Ende",r.ende_uhr||"—"],
+                ["Pause",r.pause_minuten?(r.pause_minuten+" min"):"—"],
+                ["Netto",r.arbeitsstunden?.toFixed(2)+" h"],
+              ].map(([label,wert])=>(
+                <div key={label} style={{background:"#f8fafc",borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",marginBottom:4}}>{label}</div>
+                  <div style={{fontSize:16,fontWeight:800,color:"#0f1923"}}>{wert}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tätigkeit */}
+          {r.taetigkeit&&(
+            <div style={{padding:"14px 18px",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:8,letterSpacing:"0.06em"}}>DURCHGEFÜHRTE ARBEITEN</div>
+              <p style={{fontSize:14,color:"#334155",margin:0,lineHeight:1.7,background:"#f8fafc",borderRadius:8,padding:"10px 14px"}}>{r.taetigkeit}</p>
+            </div>
+          )}
+
+          {/* Materialien */}
+          {mat.length>0&&(
+            <div style={{padding:"14px 18px",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:10,letterSpacing:"0.06em"}}>MATERIALIEN</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{background:"#f8fafc"}}>
+                    {["Bezeichnung","Menge","Einheit","Preis/Einh.","Gesamt"].map(h=>(
+                      <th key={h} style={{padding:"7px 10px",textAlign:"left",fontSize:11,fontWeight:700,color:"#64748b",borderBottom:"1px solid #e2e8f0"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {mat.map((m,i)=>{
+                    const g = parseFloat(m.menge||0)*parseFloat(m.preis||0);
+                    return (
+                      <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                        <td style={{padding:"7px 10px",fontWeight:600}}>{m.bezeichnung}</td>
+                        <td style={{padding:"7px 10px",color:"#475569"}}>{m.menge}</td>
+                        <td style={{padding:"7px 10px",color:"#475569"}}>{m.einheit}</td>
+                        <td style={{padding:"7px 10px",color:"#475569"}}>{m.preis?m.preis+" €":"—"}</td>
+                        <td style={{padding:"7px 10px",fontWeight:600,color:"#15803d"}}>{g>0?g.toFixed(2)+" €":"—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {gesamtPreis>0&&(
+                  <tfoot>
+                    <tr style={{background:"#fef9c3"}}>
+                      <td colSpan={4} style={{padding:"8px 10px",fontWeight:700,fontSize:13}}>Materialgesamt</td>
+                      <td style={{padding:"8px 10px",fontWeight:800,fontSize:14,color:"#0f1923"}}>{gesamtPreis.toFixed(2)} €</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )}
+
+          {/* Unterschriften */}
+          <div style={{padding:"14px 18px",background:"#fafafa"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:10,letterSpacing:"0.06em"}}>UNTERSCHRIFTEN</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {[["👤 Mitarbeiter",r.unterschrift_mitarbeiter],["🏢 Kunde",r.unterschrift_kunde]].map(([label,sig])=>(
+                <div key={label} style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,padding:12}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:8}}>{label}</div>
+                  {sig ? (
+                    <img src={sig} alt={label} style={{width:"100%",height:60,objectFit:"contain",border:"none"}}/>
+                  ) : (
+                    <div style={{height:60,display:"flex",alignItems:"center",justifyContent:"center",color:"#94a3b8",fontSize:12}}>Keine Unterschrift</div>
+                  )}
+                  <div style={{borderTop:"1px solid #e2e8f0",marginTop:8,paddingTop:4,fontSize:11,color:"#94a3b8",textAlign:"center"}}>
+                    {sig?"✓ Unterschrieben":"Ausstehend"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Notizen */}
+          {r.notizen&&(
+            <div style={{padding:"14px 18px",borderTop:"1px solid #f1f5f9"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:6,letterSpacing:"0.06em"}}>NOTIZEN</div>
+              <p style={{fontSize:13,color:"#64748b",margin:0,lineHeight:1.6}}>{r.notizen}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 import { useState, useEffect, useRef } from "react";
 import { useApp } from "../App";
 import { Btn, Input, Select, Textarea, Modal, Lader } from "../components/ui/UI";
@@ -285,21 +418,10 @@ export default function AuftraegePage() {
         </div>
 
         {gewaehlter.regiezettel?.length>0&&(
-          <div style={{background:"white",border:"1.5px solid #e2e8f0",borderRadius:12,padding:18}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:12}}>REGIEZETTEL ({gewaehlter.regiezettel.length})</div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:"0.06em"}}>REGIEZETTEL ({gewaehlter.regiezettel.length})</div>
             {gewaehlter.regiezettel.map(r=>(
-              <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f1f5f9",flexWrap:"wrap",gap:8}}>
-                <div>
-                  <div style={{fontSize:14,fontWeight:700}}>{new Date(r.datum).toLocaleDateString("de-DE",{day:"numeric",month:"short",year:"numeric"})}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>{r.arbeitsstunden?.toFixed(2)}h · {r.taetigkeit?.slice(0,50)||"—"}</div>
-                  <div style={{display:"flex",gap:6,marginTop:4}}>
-                    <span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:r.unterschrift_mitarbeiter?"#dcfce7":"#f1f5f9",color:r.unterschrift_mitarbeiter?"#15803d":"#94a3b8"}}>👤 MA</span>
-                    <span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:r.unterschrift_kunde?"#dcfce7":"#f1f5f9",color:r.unterschrift_kunde?"#15803d":"#94a3b8"}}>🏢 Kunde</span>
-                    {r.pdf_erstellt_am&&<span style={{fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:4,background:"#dbeafe",color:"#1e40af"}}>📄 PDF</span>}
-                  </div>
-                </div>
-                <Btn onClick={()=>pdfHerunterladen(gewaehlter.id,r.id)} variant="ghost" size="sm">{pdfLaden?"⏳":"📄 PDF"}</Btn>
-              </div>
+              <RzKarte key={r.id} r={r} auftrag={gewaehlter} pdfHerunterladen={pdfHerunterladen} pdfLaden={pdfLaden} />
             ))}
           </div>
         )}

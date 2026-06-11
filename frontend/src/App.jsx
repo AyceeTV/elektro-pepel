@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import { translations, kiUebersetzen } from "./i18n/translations";
 import LoginPage from "./pages/LoginPage";
+import HomePage from "./pages/HomePage";
 import ZeiterfassungPage from "./pages/ZeiterfassungPage";
 import BaustellenPage from "./pages/BaustellenPage";
 import UrlaubPage from "./pages/UrlaubPage";
@@ -20,7 +21,7 @@ export default function App() {
   const [sprache, setSprache] = useState(localStorage.getItem("sprache") || "de");
   const [user, setUser] = useState(JSON.parse(localStorage.getItem("user") || "null"));
   const [token, setToken] = useState(localStorage.getItem("token") || "");
-  const [seite, setSeite] = useState("zeiterfassung");
+  const [seite, setSeite] = useState("home");
   const [toast, setToast] = useState(null);
   const [sidebarOffen, setSidebarOffen] = useState(false);
 
@@ -80,6 +81,7 @@ export default function App() {
   ].filter(n => !n.roles || n.roles.includes(user.rolle));
 
   const seiten = {
+    home: <HomePage />,
     zeiterfassung: <ZeiterfassungPage />,
     baustellen: <BaustellenPage />,
     urlaub: <UrlaubPage />,

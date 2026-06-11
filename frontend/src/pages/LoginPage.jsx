@@ -26,9 +26,17 @@ export default function LoginPage({ onLogin }) {
       });
       if (res.ok) {
         const data = await res.json();
+        // Backend gibt: access_token, rolle, vorname, user_id zurück
+        const userObj = {
+          id: data.user_id,
+          vorname: data.vorname,
+          nachname: "",
+          email: email,
+          rolle: data.rolle,
+        };
         localStorage.setItem("token", data.access_token);
-        localStorage.setItem("user", JSON.stringify(data.user));
-        onLogin(data.user, data.access_token);
+        localStorage.setItem("user", JSON.stringify(userObj));
+        onLogin(userObj, data.access_token);
       } else {
         setFehler(ro ? "E-mail sau parolă incorectă" : "E-Mail oder Passwort falsch");
       }

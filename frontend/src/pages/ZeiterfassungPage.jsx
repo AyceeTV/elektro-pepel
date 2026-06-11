@@ -4,7 +4,7 @@ import { useApp } from "../App";
 import { Seite, Karte, StatKarte, Btn, Select, Textarea, Tabelle, Modal, Lader, Badge } from "../components/ui/UI";
 
 export default function ZeiterfassungPage() {
-  const { t, apiFetch, showToast, user } = useApp();
+  const { t, sprache, apiFetch, showToast, user } = useApp();
   const [status, setStatus] = useState(null);
   const [uhr, setUhr] = useState(new Date());
   const [baustellen, setBaustellen] = useState([]);

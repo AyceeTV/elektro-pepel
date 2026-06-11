@@ -1,5 +1,5 @@
 import { useState, useEffect, createContext, useContext } from "react";
-import { translations } from "./i18n/translations";
+import { translations, kiUebersetzen } from "./i18n/translations";
 import LoginPage from "./pages/LoginPage";
 import ZeiterfassungPage from "./pages/ZeiterfassungPage";
 import BaustellenPage from "./pages/BaustellenPage";

@@ -65,13 +65,13 @@ export default function App() {
   const ctx = { t, sprache, spracheWechseln, user, token, apiFetch, showToast, abmelden, seite, setSeite, API };
 
   if (!user) return (
-    <AppContext.Provider value={ctx}>
-      <LoginPage onLogin={(u, tk) => {
-        setUser(u); setToken(tk);
-        localStorage.setItem("user", JSON.stringify(u));
-        localStorage.setItem("token", tk);
-      }} />
-    </AppContext.Provider>
+    <LoginPage onLogin={(u, tk) => {
+      localStorage.setItem("user", JSON.stringify(u));
+      localStorage.setItem("token", tk);
+      setUser(u);
+      setToken(tk);
+      setSeite("home");
+    }} />
   );
 
   const navItems = [

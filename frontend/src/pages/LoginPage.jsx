@@ -1,9 +1,13 @@
 import { useState } from "react";
+
 export default function LoginPage({ onLogin }) {
-  const [sprache, setSprache] = (() => {
-    const [s, setS] = [localStorage.getItem("sprache")||"de", (lang) => { localStorage.setItem("sprache",lang); window.location.reload(); }];
-    return [s, setS];
-  })();
+  const [sprache, setSprache] = useState(localStorage.getItem("sprache") || "de");
+  
+  function spracheWechseln(lang) {
+    localStorage.setItem("sprache", lang);
+    setSprache(lang);
+    window.location.reload();
+  }
   const [email, setEmail] = useState("");
   const [passwort, setPasswort] = useState("");
   const [fehler, setFehler] = useState("");
@@ -57,7 +61,7 @@ export default function LoginPage({ onLogin }) {
 
       {/* Sprache oben rechts */}
       <div style={{display:"flex",justifyContent:"flex-end",padding:"16px 20px",position:"relative",zIndex:10}}>
-        <button onClick={()=>setSprache(ro?"de":"ro")} style={{
+        <button onClick={()=>spracheWechseln(ro?"de":"ro")} style={{
           background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",
           borderRadius:20,padding:"5px 14px",color:"white",fontSize:12,fontWeight:600,cursor:"pointer"
         }}>{ro?"🇩🇪 DE":"🇷🇴 RO"}</button>
@@ -172,7 +176,7 @@ export default function LoginPage({ onLogin }) {
 
       {/* Sprache */}
       <div style={{position:"absolute",top:24,right:24,zIndex:10}}>
-        <button onClick={()=>setSprache(ro?"de":"ro")} style={{
+        <button onClick={()=>spracheWechseln(ro?"de":"ro")} style={{
           background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",
           borderRadius:20,padding:"6px 16px",color:"white",fontSize:13,fontWeight:600,cursor:"pointer",
           backdropFilter:"blur(10px)",

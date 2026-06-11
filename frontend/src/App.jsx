@@ -9,6 +9,7 @@ import TeamPage from "./pages/TeamPage";
 import AdminPage from "./pages/AdminPage";
 import AuftraegePage from "./pages/AuftraegePage";
 import BuchhaltungPage from "./pages/BuchhaltungPage";
+import VerwaltungPage from "./pages/VerwaltungPage";
 
 export const AppContext = createContext();
 export const useApp = () => useContext(AppContext);
@@ -85,9 +86,15 @@ export default function App() {
     admin: <AdminPage />,
     auftraege: <AuftraegePage />,
     buchhaltung: <BuchhaltungPage />,
+    verwaltung_katalog: <VerwaltungPage />,
   };
 
-  const isMobile = window.innerWidth < 768;
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   return (
     <AppContext.Provider value={ctx}>

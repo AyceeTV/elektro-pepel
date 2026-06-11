@@ -236,6 +236,28 @@ export default function AuftraegePage() {
   const [form, setForm] = useState(leerForm);
   const [rz, setRz] = useState({datum:new Date().toISOString().slice(0,10),beginn_uhr:"07:00",ende_uhr:"16:00",pause_minuten:0,taetigkeit:"",notizen:"",materialien:[]});
   const [matZ, setMatZ] = useState({bezeichnung:"",menge:"",einheit:"Stk",preis:""});
+  const [produktSuche, setProduktSuche] = useState("");
+  const [produktVorschlaege, setProduktVorschlaege] = useState([]);
+  const [azPreise, setAzPreise] = useState([]);
+  const [anfahrtPreise, setAnfahrtPreise] = useState([]);
+
+  useEffect(() => {
+    apiFetch("/api/katalog/arbeitszeitpreise").then(r=>r?.ok&&r.json().then(setAzPreise));
+    apiFetch("/api/katalog/anfahrt").then(r=>r?.ok&&r.json().then(setAnfahrtPreise));
+  }, []);
+
+  async function sucheProdukte(q) {
+    setProduktSuche(q);
+    if (q.length < 2) { setProduktVorschlaege([]); return; }
+    const res = await apiFetch(`/api/katalog/produkte?suche=${encodeURIComponent(q)}`);
+    if (res?.ok) setProduktVorschlaege(await res.json());
+  }
+
+  function produktWaehlen(p) {
+    setMatZ({bezeichnung:p.bezeichnung,menge:"1",einheit:p.einheit,preis:String(p.preis)});
+    setProduktSuche(p.bezeichnung);
+    setProduktVorschlaege([]);
+  }
 
   useEffect(() => { ladeAlles(); }, []);
 
@@ -445,25 +467,92 @@ export default function AuftraegePage() {
             <textarea value={rz.taetigkeit} onChange={e=>setRz({...rz,taetigkeit:e.target.value})} rows={3} placeholder="Was wurde gemacht?" style={{width:"100%",padding:"10px 12px",fontSize:14,border:"1.5px solid #e2e8f0",borderRadius:8,boxSizing:"border-box",resize:"none",outline:"none",fontFamily:"inherit"}}/>
           </div>
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:8}}>MATERIALIEN</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:8}}>MATERIALIEN & POSITIONEN</div>
+
+            {/* Anfahrtspauschalen Schnellauswahl */}
+            {anfahrtPreise.length>0&&(
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,color:"#64748b",marginBottom:6,fontWeight:600}}>🚗 Anfahrtspauschale:</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {anfahrtPreise.map(af=>(
+                    <button key={af.id} onClick={()=>setRz({...rz,materialien:[...rz.materialien,{bezeichnung:af.bezeichnung,menge:"1",einheit:"Pauschale",preis:String(af.preis)}]})}
+                      style={{padding:"5px 12px",background:"#f1f5f9",border:"1.5px solid #e2e8f0",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",color:"#475569"}}>
+                      + {af.bezeichnung} ({af.preis.toFixed(2)}€)
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Arbeitszeit Schnellauswahl */}
+            {azPreise.length>0&&(
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,color:"#64748b",marginBottom:6,fontWeight:600}}>⏱ Arbeitszeit:</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {azPreise.map(az=>(
+                    <button key={az.id} onClick={()=>{
+                      const std = rzStd > 0 ? rzStd : 1;
+                      setRz({...rz,materialien:[...rz.materialien,{bezeichnung:`Arbeitszeit ${az.bezeichnung}`,menge:String(std),einheit:"Std",preis:String(az.preis_stunde)}]});
+                    }}
+                      style={{padding:"5px 12px",background:"#dcfce7",border:"1.5px solid #bbf7d0",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",color:"#15803d"}}>
+                      + {az.bezeichnung} ({az.preis_stunde.toFixed(2)}€/h)
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Produkt-Suche */}
+            <div style={{position:"relative",marginBottom:8}}>
+              <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",fontSize:14}}>🔍</span>
+              <input value={produktSuche} onChange={e=>sucheProdukte(e.target.value)}
+                placeholder="Artikel suchen (Name oder Artikelnummer)..."
+                style={{width:"100%",padding:"8px 12px 8px 32px",fontSize:13,border:"1.5px solid #e2e8f0",borderRadius:8,boxSizing:"border-box",outline:"none"}}/>
+              {produktVorschlaege.length>0&&(
+                <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",border:"1.5px solid #e2e8f0",borderRadius:8,zIndex:999,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",maxHeight:200,overflowY:"auto"}}>
+                  {produktVorschlaege.map(p=>(
+                    <div key={p.id} onClick={()=>produktWaehlen(p)}
+                      style={{padding:"8px 14px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                      onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                      <div>
+                        <span style={{fontSize:13,fontWeight:600}}>{p.bezeichnung}</span>
+                        {p.artikelnummer&&<span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>#{p.artikelnummer}</span>}
+                      </div>
+                      <span style={{fontSize:13,fontWeight:700,color:"#15803d"}}>{p.preis.toFixed(2)}€/{p.einheit}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Vorhandene Positionen */}
             {rz.materialien.map((m,i)=>(
               <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,background:"#f8fafc",borderRadius:6,padding:"6px 10px",fontSize:13}}>
                 <span style={{flex:1,fontWeight:600}}>{m.bezeichnung}</span>
                 <span style={{color:"#64748b"}}>{m.menge} {m.einheit}</span>
-                {m.preis&&<span style={{color:"#15803d",fontWeight:600}}>{m.preis}€</span>}
+                {m.preis&&<span style={{color:"#15803d",fontWeight:600}}>{(parseFloat(m.menge||0)*parseFloat(m.preis||0)).toFixed(2)}€</span>}
                 <button onClick={()=>setRz({...rz,materialien:rz.materialien.filter((_,j)=>j!==i)})} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:16,padding:"0 2px"}}>✕</button>
               </div>
             ))}
+
+            {/* Manuelle Eingabe */}
             <div style={{display:"grid",gridTemplateColumns:"2fr 50px 55px 60px 34px",gap:6,marginTop:6}}>
               <input value={matZ.bezeichnung} onChange={e=>setMatZ({...matZ,bezeichnung:e.target.value})} placeholder="Bezeichnung" style={{padding:"8px 10px",fontSize:13,border:"1.5px solid #e2e8f0",borderRadius:6,outline:"none"}}/>
               <input value={matZ.menge} onChange={e=>setMatZ({...matZ,menge:e.target.value})} placeholder="Menge" style={{padding:"8px 6px",fontSize:13,border:"1.5px solid #e2e8f0",borderRadius:6,outline:"none",textAlign:"center"}}/>
               <select value={matZ.einheit} onChange={e=>setMatZ({...matZ,einheit:e.target.value})} style={{padding:"8px 4px",fontSize:12,border:"1.5px solid #e2e8f0",borderRadius:6,outline:"none"}}>
-                {["Stk","m","m²","kg","L","Pkg","Std"].map(e=><option key={e}>{e}</option>)}
+                {["Stk","m","m²","kg","L","Pkg","Std","Pauschale"].map(e=><option key={e}>{e}</option>)}
               </select>
               <input value={matZ.preis} onChange={e=>setMatZ({...matZ,preis:e.target.value})} placeholder="€" style={{padding:"8px 6px",fontSize:13,border:"1.5px solid #e2e8f0",borderRadius:6,outline:"none",textAlign:"center"}}/>
-              <button onClick={()=>{if(!matZ.bezeichnung)return;setRz({...rz,materialien:[...rz.materialien,{...matZ}]});setMatZ({bezeichnung:"",menge:"",einheit:"Stk",preis:""}); }}
+              <button onClick={()=>{if(!matZ.bezeichnung)return;setRz({...rz,materialien:[...rz.materialien,{...matZ}]});setMatZ({bezeichnung:"",menge:"",einheit:"Stk",preis:""});setProduktSuche(""); }}
                 style={{width:34,height:34,background:"#0f1923",border:"none",borderRadius:6,color:"white",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
             </div>
+
+            {/* Gesamtsumme */}
+            {rz.materialien.length>0&&(()=>{
+              const sum = rz.materialien.reduce((s,m)=>s+(parseFloat(m.menge||0)*parseFloat(m.preis||0)),0);
+              return sum>0?<div style={{textAlign:"right",fontSize:13,fontWeight:700,color:"#15803d",marginTop:8}}>Gesamt: {sum.toFixed(2)} €</div>:null;
+            })()}
           </div>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:6}}>NOTIZEN</div>

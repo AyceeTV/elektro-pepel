@@ -91,7 +91,12 @@ export default function AuftraegePage() {
   const [zeichneAktiv, setZeichneAktiv] = useState(false);
   const canvasMA = useRef(null);
   const canvasKU = useRef(null);
-  const isMobile = window.innerWidth < 768;
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
   const kannErstellen = ["admin","verwaltung","vorgesetzter"].includes(user.rolle);
 
   const leerForm = {titel:"",typ:"kundendienst",beschreibung:"",kunde_name:"",kunde_adresse:"",kunde_telefon:"",kunde_email:"",kunde_notiz:"",termin_datum:"",termin_von:"",termin_bis:"",mitarbeiter_ids:[]};
